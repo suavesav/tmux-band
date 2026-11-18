@@ -1,0 +1,122 @@
+#!/bin/sh
+# band-new [-n title] [-t tag] [-m model] [-C dir] [--no-attach] [-- command words...]
+# Opens one band window (sidebar + a shell running the command) and prints its window id.
+self=$0
+while [ -L "$self" ]; do
+  link=$(readlink "$self") || exit 1
+  case $link in /*) self=$link ;; *) self=$(dirname "$self")/$link ;; esac
+done
+B=$(CDPATH= cd "$(dirname "$self")/.." 2>/dev/null && pwd) || exit 1
+TMUX_BIN=
+for p in /opt/homebrew/bin/tmux /usr/local/bin/tmux /usr/bin/tmux; do
+  [ -x "$p" ] && { TMUX_BIN=$p; break; }
+done
+[ -n "$TMUX_BIN" ] || TMUX_BIN=$(command -v tmux 2>/dev/null)
+[ -n "$TMUX_BIN" ] || { echo "band-new: tmux not found" >&2; exit 1; }
+NODE_BIN=
+for p in /opt/homebrew/bin/node /usr/local/bin/node /usr/bin/node "$(command -v node 2>/dev/null)"; do
+  [ -n "$p" ] && [ -x "$p" ] || continue
+  "$p" -e 'process.exit(Number(process.versions.node.split(".")[0]) >= 18 ? 0 : 1)' 2>/dev/null || continue
+  NODE_BIN=$p; break
+done
+[ -n "$NODE_BIN" ] || { echo "band-new: node 18 or newer not found" >&2; exit 1; }
+SOCK="$B/state/tmux.sock"
+t() { "$TMUX_BIN" -S "$SOCK" "$@"; }
+usage() {
+  echo "usage: band-new [-n title] [-t tag] [-m model] [-C dir] [--no-attach] [-- command words...]" >&2
+  exit 2
+}
+
+title=; tag=; model=; dir=$PWD; attach=1; cmd=claude
+while [ $# -gt 0 ]; do
+  case $1 in
+    -n) [ $# -ge 2 ] || usage; title=$2; shift 2 ;;
+    -t) [ $# -ge 2 ] || usage; tag=$2; shift 2 ;;
+    -m) [ $# -ge 2 ] || usage; model=$2; shift 2 ;;
+    -C) [ $# -ge 2 ] || usage; dir=$2; shift 2 ;;
+    --no-attach) attach=0; shift ;;
+    --) shift; cmd=$*; break ;;
+    *) usage ;;
+  esac
+done
+if [ -d "$dir" ]; then
+  dir=$(CDPATH= cd "$dir" && pwd) || exit 1
+else
+  case $dir in /*) ;; *) dir=$PWD/$dir ;; esac
+fi
+
+vals=$("$NODE_BIN" --input-type=module -e '
+const { pathToFileURL } = await import("node:url");
+const [core, rawTitle, dir, tag, model] = process.argv.slice(1);
+const { optionValue } = await import(pathToFileURL(core).href);
+const first = rawTitle.split(/\r?\n/).find((l) => l.trim() !== "") ?? "";
+const base = dir.split("/").filter(Boolean).pop() ?? "";
+const title = optionValue(first, 40) || optionValue(base, 40) || "session";
+console.log(title.replaceAll("#", "##"));
+console.log(optionValue(tag, 40));
+console.log(optionValue(model, 40));
+' -- "$B/sidebar-core.mjs" "$title" "$dir" "$tag" "$model") || { echo "band-new: could not shape the title" >&2; exit 1; }
+title=$(printf '%s\n' "$vals" | sed -n 1p)
+tag=$(printf '%s\n' "$vals" | sed -n 2p)
+model=$(printf '%s\n' "$vals" | sed -n 3p)
+
+# tmux format-expands -c and ends a command at a trailing ";", so a folder
+# with "#" or a final ";" is entered instead of named.
+in_dir() {
+  case $dir in
+    *'#'*|*';')
+      if [ -d "$dir" ]; then (CDPATH= cd "$dir" && "$@"); else "$@"; fi ;;
+    *) "$@" -c "$dir" ;;
+  esac
+}
+
+mkdir -p "$B/state" && chmod 700 "$B/state" || exit 1
+if t has-session -t =band 2>/dev/null; then
+  if [ ! -e "$B/state/conf-sourced" ] || [ "$B/tmux.conf" -nt "$B/state/conf-sourced" ]; then
+    t source-file "$B/tmux.conf" && touch "$B/state/conf-sourced"
+  fi
+  out=$(in_dir t new-window -d -t band: -n "$title" -P -F '#{window_id} #{pane_id}') || exit 1
+else
+  set -- "PATH=$PATH" "HOME=$HOME" "LANG=${LANG:-en_US.UTF-8}" TERM=xterm-256color COLORTERM=truecolor
+  [ -n "${USER:-}" ] && set -- "$@" "USER=$USER"
+  [ -n "${LOGNAME:-}" ] && set -- "$@" "LOGNAME=$LOGNAME"
+  [ -n "${SHELL:-}" ] && set -- "$@" "SHELL=$SHELL"
+  [ -n "${TMPDIR:-}" ] && set -- "$@" "TMPDIR=$TMPDIR"
+  [ -n "${SSH_AUTH_SOCK:-}" ] && set -- "$@" "SSH_AUTH_SOCK=$SSH_AUTH_SOCK"
+  # A Linux desktop session: browser logins, the clipboard and the keyring need these.
+  [ -n "${DISPLAY:-}" ] && set -- "$@" "DISPLAY=$DISPLAY"
+  [ -n "${WAYLAND_DISPLAY:-}" ] && set -- "$@" "WAYLAND_DISPLAY=$WAYLAND_DISPLAY"
+  [ -n "${XDG_RUNTIME_DIR:-}" ] && set -- "$@" "XDG_RUNTIME_DIR=$XDG_RUNTIME_DIR"
+  [ -n "${DBUS_SESSION_BUS_ADDRESS:-}" ] && set -- "$@" "DBUS_SESSION_BUS_ADDRESS=$DBUS_SESSION_BUS_ADDRESS"
+  out=$(in_dir env -i "$@" "$TMUX_BIN" -S "$SOCK" -f "$B/tmux.conf" new-session -d -s band -n "$title" \
+    -x 200 -y 50 -P -F '#{window_id} #{pane_id}') || exit 1
+  touch "$B/state/server-started" "$B/state/conf-sourced"
+fi
+
+printf %s "$out" | grep -Eq '^@[0-9]+ %[0-9]+$' || { echo "band-new: unexpected tmux output: $out" >&2; exit 1; }
+win=${out% *}
+pane=${out#* }
+fail() {
+  echo "band-new: $1" >&2
+  t kill-window -t "$win" 2>/dev/null
+  exit 1
+}
+t set-option -w -t "$win" @band_since "$(date +%s)" || fail "could not stamp the window"
+if [ -n "$tag" ]; then t set-option -w -t "$win" @band_tag "$tag" || fail "could not set the tag"; fi
+if [ -n "$model" ]; then t set-option -w -t "$win" @band_model "$model" || fail "could not set the model"; fi
+t split-window -d -hb -l 30 -t "$pane" "$NODE_BIN" "$B/sidebar.mjs" "$TMUX_BIN" "$SOCK" || fail "could not open the sidebar"
+if [ -n "$cmd" ]; then
+  # tmux reads a final ";" as a command separator and turns "\;" back into ";".
+  case $cmd in *';') typed="${cmd%;}\\;" ;; *) typed=$cmd ;; esac
+  t send-keys -t "$pane" -l -- "$typed" || fail "could not type the command"
+  t send-keys -t "$pane" Enter || echo "band-new: Enter was not sent to $pane" >&2
+fi
+
+if [ "$attach" -eq 1 ]; then
+  clients=$(t list-clients -t =band -F '#{client_tty}' 2>/dev/null)
+  if [ -z "$clients" ]; then
+    t select-window -t "$win"
+    "$B/bin/band-attach" --no-restore >&2
+  fi
+fi
+printf '%s\n' "$win"

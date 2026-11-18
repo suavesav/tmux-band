@@ -1,0 +1,44 @@
+#!/bin/sh
+# band-restore [--no-attach | --list]: reopen up to 12 sessions a previous tmux server took with it.
+self=$0
+while [ -L "$self" ]; do
+  link=$(readlink "$self") || exit 1
+  case $link in /*) self=$link ;; *) self=$(dirname "$self")/$link ;; esac
+done
+B=$(CDPATH= cd "$(dirname "$self")/.." 2>/dev/null && pwd) || exit 1
+TMUX_BIN=
+for p in /opt/homebrew/bin/tmux /usr/local/bin/tmux /usr/bin/tmux; do
+  [ -x "$p" ] && { TMUX_BIN=$p; break; }
+done
+[ -n "$TMUX_BIN" ] || TMUX_BIN=$(command -v tmux 2>/dev/null)
+[ -n "$TMUX_BIN" ] || { echo "band-restore: tmux not found" >&2; exit 1; }
+D="$B/state"; SOCK="$D/tmux.sock"; REC="$D/sessions"; MARK="$D/server-started"
+UUID="^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\$"
+[ -d "$REC" ] || exit 0
+find "$REC" -type f -mmin +1440 -delete
+if "$TMUX_BIN" -S "$SOCK" list-sessions >/dev/null 2>&1; then
+  live=$("$TMUX_BIN" -S "$SOCK" list-windows -a -F '#{@band_session}')
+  for f in $(find "$REC" -type f -newer "$MARK" -exec basename {} \;); do
+    printf '%s\n' "$live" | grep -qx "$f" || rm -f "$REC/$f"
+  done
+  lost=$(find "$REC" -type f ! -newer "$MARK" -exec ls -tr {} + 2>/dev/null | xargs -n1 basename 2>/dev/null)
+else
+  lost=$(ls -tr "$REC")
+fi
+if [ "$1" = --list ]; then
+  for id in $lost; do
+    printf %s "$id" | grep -Eq "$UUID" && printf '%s\n' "$id"
+  done
+  exit 0
+fi
+q() { printf "'%s'" "$(printf '%s' "$1" | sed "s/'/'\\\\''/g")"; }
+n=0
+for id in $lost; do
+  printf %s "$id" | grep -Eq "$UUID" || continue
+  { IFS= read -r cwd; IFS= read -r title; IFS= read -r tag; IFS= read -r cfg; } < "$REC/$id"
+  cmd="claude --resume $id"
+  [ -n "$cfg" ] && cmd="CLAUDE_CONFIG_DIR=$(q "$cfg") $cmd"
+  "$B/bin/band-new" --no-attach -n "$title" ${tag:+-t "$tag"} -C "$cwd" -- "$cmd" >/dev/null && rm -f "$REC/$id"
+  n=$((n + 1)); [ "$n" -ge 12 ] && break
+done
+[ "$1" = --no-attach ] || [ "$n" -eq 0 ] || "$B/bin/band-attach" --no-restore

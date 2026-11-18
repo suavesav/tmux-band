@@ -1,0 +1,102 @@
+#!/bin/sh
+# band-attach [--restore | --no-restore]: bring the band terminal window forward, or open one.
+self=$0
+while [ -L "$self" ]; do
+  link=$(readlink "$self") || exit 1
+  case $link in /*) self=$link ;; *) self=$(dirname "$self")/$link ;; esac
+done
+B=$(CDPATH= cd "$(dirname "$self")/.." 2>/dev/null && pwd) || exit 1
+TMUX_BIN=
+for p in /opt/homebrew/bin/tmux /usr/local/bin/tmux /usr/bin/tmux; do
+  [ -x "$p" ] && { TMUX_BIN=$p; break; }
+done
+[ -n "$TMUX_BIN" ] || TMUX_BIN=$(command -v tmux 2>/dev/null)
+[ -n "$TMUX_BIN" ] || { echo "band-attach: tmux not found" >&2; exit 1; }
+SOCK="$B/state/tmux.sock"
+OSA=${BAND_OSASCRIPT:-osascript}
+t() { "$TMUX_BIN" -S "$SOCK" "$@"; }
+q() { printf "'%s'" "$(printf '%s' "$1" | sed "s/'/'\\\\''/g")"; }
+# GNU stat -f prints filesystem text and fails, so its output is replaced.
+mtime() { m=$(stat -f %m "$1" 2>/dev/null) || m=$(stat -c %Y "$1" 2>/dev/null) || m=0; printf %s "$m"; }
+
+restore=ask
+for a in "$@"; do
+  case $a in
+    --no-restore) restore=no ;;
+    --restore) restore=yes ;;
+    *) echo "usage: band-attach [--restore | --no-restore]" >&2; exit 2 ;;
+  esac
+done
+
+if [ "$restore" != no ]; then
+  n=$("$B/bin/band-restore" --list | grep -c .)
+  if [ "$n" -gt 0 ]; then
+    go=0
+    if [ "$restore" = yes ]; then
+      go=1
+    elif [ -t 0 ]; then
+      if [ "$n" -eq 1 ]; then printf 'Reopen 1 session? [Y/n] ' >&2; else printf 'Reopen %s sessions? [Y/n] ' "$n" >&2; fi
+      if IFS= read -r answer; then
+        case $answer in ''|y*|Y*) go=1 ;; esac
+      fi
+    fi
+    [ "$go" -eq 1 ] && "$B/bin/band-restore" --no-attach
+  fi
+fi
+
+if ! t has-session -t =band 2>/dev/null; then
+  echo "no band session"
+  exit 0
+fi
+
+line="$(q "$TMUX_BIN") -S $(q "$SOCK") attach -t '=band'"
+if ! command -v "$OSA" >/dev/null 2>&1; then
+  printf '%s\n' "$line"
+  exit 0
+fi
+
+iterm=0
+if [ -e /Applications/iTerm.app ] || [ -e "$HOME/Applications/iTerm.app" ]; then iterm=1; fi
+
+if [ "$iterm" -eq 1 ]; then
+  for tty in $(t list-clients -t =band -F '#{client_tty}' 2>/dev/null); do
+    printf %s "$tty" | grep -Eq '^/dev/ttys[0-9]{1,4}$' || continue
+    found=$("$OSA" -e "tell application \"iTerm2\"
+  repeat with w in windows
+    repeat with t in tabs of w
+      repeat with s in sessions of t
+        if tty of s is \"$tty\" then
+          tell t to select
+          tell s to select
+          tell w to select
+          activate
+          return \"ok\"
+        end if
+      end repeat
+    end repeat
+  end repeat
+  return \"none\"
+end tell" 2>/dev/null)
+    [ "$found" = ok ] && exit 0
+  done
+fi
+
+mkdir -p "$B/state"
+if [ -e "$B/state/attach-at" ] && [ $(( $(date +%s) - $(mtime "$B/state/attach-at") )) -lt 10 ]; then
+  exit 0
+fi
+touch "$B/state/attach-at"
+text=$(printf '%s' "$line" | sed 's/\\/\\\\/g; s/"/\\"/g')
+if [ "$iterm" -eq 1 ]; then
+  "$OSA" -e "tell application \"iTerm2\"
+  set w to (create window with default profile)
+  tell current session of w to write text \"$text\"
+  activate
+end tell" >/dev/null
+else
+  "$OSA" -e "tell application \"Terminal\"
+  do script \"$text\"
+  activate
+end tell" >/dev/null
+fi
+exit 0

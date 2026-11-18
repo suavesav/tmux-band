@@ -1,0 +1,1013 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>tmux-band Spec</title>
+<style>
+:root {
+  --bg: #fbfaf8; --fg: #1f1e1c; --muted: #6b675f; --line: #e3e0da;
+  --code-bg: #f1efea; --accent: #8a5a00; --term-bg: #1c1c1c; --term-fg: #d0d0d0;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #171716; --fg: #e8e6e1; --muted: #9a958c; --line: #2e2d2a;
+    --code-bg: #222120; --accent: #e0a63a;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #171716; --fg: #e8e6e1; --muted: #9a958c; --line: #2e2d2a;
+  --code-bg: #222120; --accent: #e0a63a;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--fg); font: 15px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+main { max-width: 900px; margin: 0 auto; padding: 32px 16px 80px; }
+h1 { font-size: 26px; margin: 0 0 16px; }
+h2 { font-size: 19px; margin: 40px 0 10px; padding-top: 12px; border-top: 1px solid var(--line); }
+h3 { font-size: 16px; margin: 24px 0 6px; }
+p.sub { color: var(--muted); margin: 0 0 24px; }
+code { font: 13px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; background: var(--code-bg); padding: 1px 4px; border-radius: 3px; }
+pre { font: 12.5px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace; background: var(--code-bg); padding: 12px 14px; border-radius: 6px; overflow-x: auto; }
+pre code { background: none; padding: 0; }
+pre.term { background: var(--term-bg); color: var(--term-fg); }
+.term .o { color: #ffaf00; } .term .g { color: #5faf5f; } .term .b { color: #5fafff; } .term .d { color: #808080; } .term .r { color: #ff5f5f; } .term .m { color: #af87ff; }
+.term .act { background: #3a3a3a; } .term .bold { font-weight: 700; color: #fff; }
+table { border-collapse: collapse; width: 100%; font-size: 14px; }
+.scroll { overflow-x: auto; margin: 8px 0 16px; }
+th, td { text-align: left; vertical-align: top; padding: 6px 10px; border-bottom: 1px solid var(--line); }
+th { color: var(--muted); font-weight: 600; font-size: 12.5px; text-transform: uppercase; letter-spacing: .03em; }
+.summary { border: 1px solid var(--line); border-radius: 8px; padding: 14px 18px; background: var(--code-bg); }
+.summary dl { display: grid; grid-template-columns: max-content 1fr; gap: 6px 16px; margin: 0; }
+.summary dt { font-weight: 600; } .summary dd { margin: 0; }
+@media (max-width: 560px) { .summary dl { grid-template-columns: 1fr; gap: 2px; } .summary dd { margin-bottom: 8px; } }
+li { margin: 4px 0; }
+.note { color: var(--muted); font-size: 14px; }
+
+/* demo */
+.demo { margin: 0 0 28px; }
+.demo-scroll { overflow-x: auto; padding-bottom: 4px; }
+.demo-win { width: max-content; border-radius: 9px; overflow: hidden; box-shadow: 0 6px 24px rgba(0,0,0,.25); border: 1px solid #000; }
+.demo-bar { background: #2b2b2b; padding: 7px 10px; display: flex; gap: 7px; align-items: center; }
+.demo-bar i { width: 11px; height: 11px; border-radius: 50%; display: block; }
+.demo-bar span { color: #9a9a9a; font: 12px -apple-system, BlinkMacSystemFont, sans-serif; margin-left: 10px; }
+.demo-term { position: relative; }
+#demo-screen { margin: 0; padding: 10px 12px; border-radius: 0; background: #1c1c1c; color: #d0d0d0; font: 12.5px/1.35 ui-monospace, SFMono-Regular, Menlo, monospace; white-space: pre; overflow: visible; }
+.demo-ptr { position: absolute; font: 12.5px/1.35 ui-monospace, SFMono-Regular, Menlo, monospace; left: calc(12px + (var(--x, 70) - 0.5) * 1ch); top: calc(10px + (var(--y, 14) - 0.5) * 1.35em); transition: left .7s ease, top .7s ease; pointer-events: none; width: 0; height: 0; }
+.demo-ptr svg { display: block; filter: drop-shadow(0 1px 1px rgba(0,0,0,.6)); }
+.demo-ptr::after { content: ""; position: absolute; left: -9px; top: -9px; width: 18px; height: 18px; border-radius: 50%; border: 2px solid #fff; opacity: 0; }
+.demo-ptr.click::after { animation: ring .45s ease-out; }
+@keyframes ring { from { opacity: .9; transform: scale(.4); } to { opacity: 0; transform: scale(1.4); } }
+.demo-cap { display: flex; gap: 12px; align-items: baseline; justify-content: space-between; margin-top: 10px; }
+.demo-cap p { margin: 0; min-height: 1.5em; }
+.demo-cap button { font: inherit; font-size: 13px; color: var(--fg); background: var(--code-bg); border: 1px solid var(--line); border-radius: 6px; padding: 3px 10px; cursor: pointer; }
+.demo-label { color: var(--muted); font-size: 12.5px; margin: 6px 0 0; }
+</style>
+</head>
+<body>
+<main>
+<h1>tmux-band: build spec</h1>
+
+<figure class="demo" aria-label="Animated demo of the sidebar">
+  <div class="demo-scroll">
+    <div class="demo-win">
+      <div class="demo-bar"><i style="background:#ff5f57"></i><i style="background:#febc2e"></i><i style="background:#28c840"></i><span>band</span></div>
+      <div class="demo-term">
+        <pre id="demo-screen"></pre>
+        <div class="demo-ptr" id="demo-ptr"><svg width="14" height="20" viewBox="0 0 14 20"><path d="M1 1 L1 16 L5 12.5 L8 19 L10.5 18 L7.5 11.5 L12.5 11.5 Z" fill="#fff" stroke="#000" stroke-width="1"/></svg></div>
+      </div>
+    </div>
+  </div>
+  <div class="demo-cap"><p id="demo-cap"></p><button type="button" id="demo-btn">Pause</button></div>
+  <p class="demo-label">Animated mockup; loops every 20 s. Not normative: its column widths and truncation are simplified. Section 7 and Appendix A are the reference.</p>
+</figure>
+
+<p class="sub">One terminal window holding every Claude Code session, with a clickable sidebar that colors each session by state and shows its pull requests. Written against tmux 3.8, iTerm2, gh 2.68 and Claude Code 2.1.x. Needs tmux 3.3+, Node 18+, a POSIX shell and (for PR status) the GitHub CLI. The focus step is macOS + iTerm2; everything else runs on any Mac or Linux box.</p>
+
+<div class="summary">
+<dl>
+  <dt>What</dt><dd>A dedicated tmux server with one session (<code>band</code>). Each Claude Code session is one tmux window: a 30-column sidebar pane on the left, the CLI on the right. The sidebar lists every window with a colored state (needs input, working, done), time in that state, repo · branch, and the session's pull requests with CI state. Click a row to switch, ✕ to close, ⤢ to expand to a full-width table, <code>+ new session</code> to open a shell window in the same folder. <code>band-attach</code> brings the iTerm window forward and reopens the sessions a dead tmux server took with it.</dd>
+  <dt>How it works</dt><dd>State lives in tmux <b>window user options</b> (<code>@band_state</code>, <code>@band_since</code>, …). Claude Code hooks write them from inside the pane using <code>$TMUX_PANE</code>, and keep one record file per open session for restore. Each window's sidebar is a Node program that polls <code>tmux list-windows -F</code> once a second, draws with ANSI escapes, reads SGR mouse clicks from stdin, and polls <code>gh</code> for the PRs its session's transcript mentions.</dd>
+  <dt>Where it lives</dt><dd>One directory, <code>$BAND_HOME</code> (default <code>~/.local/share/band</code>): <code>bin/</code> (<code>band-new</code>, <code>band-attach</code>, <code>band-restore</code>, <code>band-state.sh</code>, <code>band-record.sh</code>), <code>sidebar.mjs</code>, <code>sidebar-core.mjs</code>, <code>hooks.mjs</code>, <code>tmux.conf</code>, <code>hooks.json</code>, and <code>state/</code>. An installer links <code>bin/</code> into <code>~/.local/bin</code> and adds the hooks to <code>~/.claude/settings.json</code>.</dd>
+  <dt>The hard parts</dt><dd>Holding the sidebar at 30 columns without breaking zoom (<code>resize-pane -x</code> unzooms a window); hit-testing clicks against the layout that was drawn; telling "closed" from "lost with the server" at session end; tmux format expansion in window names; tmux reading <code>-f</code> only at server start.</dd>
+</dl>
+</div>
+
+<p><b>Conformance:</b> the sidebar's drawing is pinned by the test vectors in Appendix A (exact text and exact escape sequences). An implementation passes when its <code>render</code> and <code>renderTable</code> produce those strings byte for byte.</p>
+<p class="note"><b>Checked 2026-11-18.</b> The implementation that ships beside this spec was built by an agent from the spec alone. Run beside the reference sidebar on tmux 3.8 with the same windows, it drew identical screens and left identical tmux state across 14 view and click checks, and it passes all 19 vectors. Hooks, the PR badge, <code>+ new session</code> and restore after <code>kill-server</code> were run with a real Claude Code 2.1.x session. Not run: the focus script against a real iTerm2, Linux.</p>
+
+<h2>1. What it looks like</h2>
+
+<h3>Sidebar (normal view, every window)</h3>
+<pre class="term"><span class="bold"> band                       </span><span class="d">⤢ </span>
+<span class="d"> 2 need input                 </span>
+
+ <span class="o">●</span> plan the importer        <span class="d"> ✕ </span>
+<span class="o">   needs input 31m</span><span class="d"> work       </span>
+<span class="d">   etl · main</span>
+
+<span class="act"> <span class="o">●</span> <span class="bold">fix login redirect</span>       <span class="d"> ✕ </span></span>
+<span class="act"><span class="o">   needs input 4m</span><span class="d">      </span><span class="r">#412 ✗ </span></span>
+<span class="act"><span class="d">   web-app · fix-login        </span></span>
+
+ <span class="b">◌</span> write migration test fo… <span class="d"> ✕ </span>
+<span class="b">   working 12m</span><span class="d">        </span><span class="r">#88+1 ◌ </span>
+<span class="d">   api · main</span>
+
+ <span class="g">✓</span> summarize PR feedback    <span class="d"> ✕ </span>
+<span class="g">   done 1h</span><span class="d"> work  </span><span class="m"> #318 merged </span>
+<span class="d">   docs · review-fixes</span>
+
+<span class="d"> + new session</span></pre>
+<p class="note">Grey background = the window you are in. The PR badge on the right of the state line follows the lead PR (section 7.5); <code>#88+1</code> means one more PR is attached.</p>
+
+<h3>Expanded table (click ⤢; the sidebar pane zooms to fill the window)</h3>
+<p>Appendix A, case "table 150x12", is this view at 150 columns.</p>
+
+<h2>2. Requirements</h2>
+<ol>
+  <li>All agent sessions open as windows of one tmux session in one terminal window. Closing the terminal window detaches; sessions keep running.</li>
+  <li><code>band-attach</code> brings the existing iTerm window forward when a client is attached in iTerm2, and opens one attached window when no client is attached in iTerm2 (none at all, or only in another terminal or over ssh).</li>
+  <li>When the tmux server dies (crash, <code>kill-server</code>, reboot), <code>band-attach</code> offers to reopen the sessions it took with it, each resumed with <code>claude --resume</code> in its folder, under its title and tag. A session closed on purpose is not reopened.</li>
+  <li>Mouse everywhere: click a sidebar row to switch to that session; click inside the CLI pane to type there; scroll works in panes.</li>
+  <li>State colors per session: <b>needs input</b> (orange ●, 256-color 214), <b>working</b> (blue ◌, 75), <b>done</b> (green ✓, 71), <b>seen</b> (grey ✓, 244). A <code>done</code> session turns <code>seen</code> once you focus it, so green means "finished and you haven't looked".</li>
+  <li>Each row shows title, state + time in state, an optional tag (e.g. <code>work</code> for a second account), <code>repo · branch</code> of the pane's current directory, and a badge for the PRs the session mentioned (number, CI mark or merged/closed).</li>
+  <li>✕ on a row closes that window. If the state is not <code>done</code> or <code>seen</code>, the row's state line becomes <code> Close?  yes   no</code> first.</li>
+  <li><code>+ new session</code>, under the last row, opens a new window with a sidebar and a plain login shell, in the folder of the window it was clicked in, and switches to it. No CLI starts: the user picks the account and provider by what they type.</li>
+  <li>⤢ expands to the table view; ⤡, any key, or clicking a row (which also switches to it) collapses.</li>
+  <li>The sidebar stays 30 columns wide across terminal resizes and window switches.</li>
+  <li>Does not touch the user's own <code>~/.tmux.conf</code> or any other tmux server.</li>
+</ol>
+
+<h2>3. Layout on disk and data model</h2>
+<h3>Files</h3>
+<p><code>B</code> = <code>$BAND_HOME</code> at install time (default <code>~/.local/share/band</code>). Every script finds <code>B</code> from its own location, so the hook commands written into settings need no environment: resolve <code>$0</code> through symlinks first (the installer links the commands into <code>~/.local/bin</code>; loop on <code>readlink</code>, resolving a relative target against the link's directory), then <code>B=$(CDPATH= cd "$(dirname "$resolved")/.." &amp;&amp; pwd)</code> (with <code>CDPATH</code> set, <code>cd</code> prints the directory and the value doubles). Directory mode 0700.</p>
+<p><b>Shared resolution</b>, used by every script:</p>
+<ul>
+  <li><code>TMUX_BIN</code> = the first of <code>/opt/homebrew/bin/tmux</code>, <code>/usr/local/bin/tmux</code>, <code>/usr/bin/tmux</code> that exists, else <code>command -v tmux</code>. <code>GH_BIN</code> and <code>GIT_BIN</code> the same with <code>gh</code> and <code>git</code>. <code>NODE_BIN</code> = the first of the same three folders, then <code>command -v node</code>, whose major version is 18 or more (a distribution's old <code>/usr/bin/node</code> must not win over a newer one on <code>PATH</code>); <code>BAND_GH</code> and <code>BAND_OSASCRIPT</code> override <code>gh</code> and <code>osascript</code> for tests. The server's clean environment (section 10) drops <code>BAND_GH</code>, so a test sets it on the server with <code>set-environment -g</code> before opening the window whose sidebar should see it. Always call them by absolute path: a hotkey app or launchd has no Homebrew <code>PATH</code>.</li>
+  <li><code>SOCK=B/state/tmux.sock</code>. Every tmux call is <code>"$TMUX_BIN" -S "$SOCK" …</code> (quoted, so a <code>B</code> with spaces works). Only <code>band-new</code> adds <code>-f B/tmux.conf</code>, because only it can start the server.</li>
+  <li><b>File age</b> in seconds: <code>$(date +%s)</code> minus the mtime from <code>stat -f %m</code> (macOS), falling back to <code>stat -c %Y</code> (Linux).</li>
+  <li>tmux <code>-F</code> formats in this spec separate fields with a real tab character (written <code>\t</code> here).</li>
+  <li>Escape sequences are written with spaces between them for reading (<code>ESC[?1000h ESC[?1006h</code>); the bytes have no spaces.</li>
+</ul>
+<div class="scroll"><table>
+<tr><th>Path</th><th>Content</th></tr>
+<tr><td><code>B/bin/</code></td><td><code>band</code> (5.1), <code>band-new</code>, <code>band-attach</code>, <code>band-restore</code>, <code>band-state.sh</code>, <code>band-record.sh</code></td></tr>
+<tr><td><code>B/VERSION</code></td><td>one line, the installed version</td></tr>
+<tr><td><code>B/sidebar.mjs</code>, <code>B/sidebar-core.mjs</code></td><td>the sidebar program and its pure layout module (section 7)</td></tr>
+<tr><td><code>B/tmux.conf</code></td><td>section 4</td></tr>
+<tr><td><code>B/install.sh</code></td><td>a copy of the installer, so <code>B/install.sh --uninstall</code> works without the source tree</td></tr>
+<tr><td><code>B/hooks.mjs</code></td><td>Node helper that writes <code>hooks.json</code> and merges it into or removes it from a settings file (6.4)</td></tr>
+<tr><td><code>B/hooks.json</code></td><td>the hooks block of section 6.3, with absolute paths; usable as <code>claude --settings B/hooks.json</code></td></tr>
+<tr><td><code>B/state/tmux.sock</code></td><td>the dedicated tmux server's socket (<code>SOCK</code> below)</td></tr>
+<tr><td><code>B/state/server-started</code></td><td>empty file, touched when <code>band-new</code> creates the tmux session. Its mtime is the current server's start.</td></tr>
+<tr><td><code>B/state/sessions/&lt;session id&gt;</code></td><td>one file per session that has a window: four lines, <code>cwd</code>, title, tag, <code>CLAUDE_CONFIG_DIR</code> (empty for the default account). Written atomically (tmp + <code>mv</code>).</td></tr>
+<tr><td><code>B/state/attach-at</code></td><td>mtime = last time a terminal window was opened on the attach line</td></tr>
+<tr><td><code>B/state/conf-sourced</code></td><td>mtime = last time <code>tmux.conf</code> was loaded into the running server</td></tr>
+<tr><td><code>B/state/sidebar.log</code></td><td>append-only log of sidebar errors (a sidebar's stderr is its pane, so it never writes there)</td></tr>
+</table></div>
+<p>A record file <b>not newer than <code>server-started</code></b> (or any record file while no server answers) belongs to a session a previous server took with it: it is <b>lost</b>. A record newer than the marker belongs to the running server.</p>
+
+<h3>tmux window options</h3>
+<p>Live state is stored on the tmux window as user options (<code>set-option -w -t &lt;window&gt; @name value</code>). Every sidebar re-reads them.</p>
+<div class="scroll"><table>
+<tr><th>Option</th><th>Written by</th><th>Value</th></tr>
+<tr><td><code>@band_state</code></td><td>state hook; sidebar (done→seen)</td><td><code>working</code> | <code>input</code> | <code>done</code> | <code>seen</code> | empty (unknown / process gone)</td></tr>
+<tr><td><code>@band_since</code></td><td>launcher; state hook on state change</td><td>epoch seconds of the last state change. Not touched when the state is rewritten with the same value.</td></tr>
+<tr><td><code>@band_wait</code></td><td>state hook</td><td>what input is wanted while <code>input</code> (<code>permission: Bash</code>, <code>plan approval</code>, <code>question</code>); empty otherwise.</td></tr>
+<tr><td><code>@band_session</code></td><td>record hook</td><td>Claude Code session id (UUID) running in the window.</td></tr>
+<tr><td><code>@band_pid</code></td><td>record hook</td><td>pid of the CLI that owns the window (6.2).</td></tr>
+<tr><td><code>@band_transcript</code></td><td>record hook</td><td>absolute path of the session's transcript JSONL (<code>transcript_path</code> from the hook input).</td></tr>
+<tr><td><code>@band_tag</code></td><td>launcher</td><td>short label shown dim after the state, e.g. <code>work</code>.</td></tr>
+<tr><td><code>@band_model</code></td><td>launcher (optional)</td><td>e.g. <code>opus · plan</code>; shown in the table only.</td></tr>
+<tr><td><code>@band_repo</code></td><td>that window's own sidebar, every 5 ticks</td><td><code>repo · branch</code>, or the folder name outside a repo.</td></tr>
+<tr><td><code>@band_pr</code></td><td>that window's own sidebar (PR poller, 7.6)</td><td><code>&lt;number&gt;:&lt;o|m|c&gt;:&lt;p|f|r|&gt;</code> per PR, comma-joined, at most 3: open/merged/closed, then CI passing/failing/running/none. Example <code>88:o:r,90:o:p</code>.</td></tr>
+<tr><td>window name</td><td>launcher</td><td>session title, max 40 chars, <code>#</code> escaped as <code>##</code>.</td></tr>
+</table></div>
+<p>Every value the launcher and the sidebar write to an option goes through <b><code>optionValue(s, max = 40)</code></b> (the hooks write <code>@band_wait</code>, <code>@band_session</code> and <code>@band_transcript</code> as their scripts show, unshortened): replace each control character (U+0000–001F, U+007F–009F) with a space, collapse runs of whitespace to one space, trim, keep the first <code>max</code> code points, then strip trailing <code>;</code> and whitespace. <code>@band_repo</code> uses max 60; <code>@band_pr</code> uses max 60 and then removes every <code>#</code>.</p>
+
+<p>The sidebar reads everything with one call (tab-separated, window name last because it may contain tabs; join the remaining fields with a space):</p>
+<pre><code>tmux -S $SOCK list-windows -t =band -F \
+  '#{window_id}\t#{window_active}\t#{@band_state}\t#{@band_tag}\t#{@band_since}\t#{@band_wait}\t#{@band_model}\t#{@band_repo}\t#{@band_pr}\t#{window_name}'</code></pre>
+<p>Parse each line into <code>{ id, active, state, tag, since, wait, model, repo, pr, name }</code>: skip a line whose id does not match <code>^@\d+$</code>; <code>active</code> is <code>field === '1'</code>; <code>since</code> is the number when the field is all digits, else 0; every text field has control characters removed.</p>
+
+<h2>4. Component: tmux config (<code>B/tmux.conf</code>)</h2>
+<p>Loaded with <code>-f</code> on the dedicated socket, so the user's own tmux is untouched. Because <code>~/.tmux.conf</code> is not read, <code>pane-base-index</code> is 0: the sidebar is pane <code>.0</code>, the CLI is pane <code>.1</code>.</p>
+<pre><code>set -g mouse on
+set -g status off
+set -g default-terminal "tmux-256color"
+set -s escape-time 10
+set -s extended-keys on
+set -s exit-empty off
+set -g allow-passthrough on
+set -s set-clipboard on
+set -g history-limit 50000
+set -g focus-events on
+set -g automatic-rename off
+set -g allow-rename off
+set -g renumber-windows on
+set -g pane-border-style fg=colour238
+set -g pane-active-border-style fg=colour238
+set-hook -g window-resized "if -F '#{==:#{window_zoomed_flag},0}' 'resize-pane -t :.0 -x 30'"
+set-hook -g after-select-window "if -F '#{==:#{window_zoomed_flag},0}' 'resize-pane -t :.0 -x 30'"</code></pre>
+<ul class="note">
+  <li><code>exit-empty</code> is a <b>server</b> option (<code>-s</code>): closing the last window leaves the server running, so the record hook reads that as "closed", not "lost". Probed on tmux 3.8: <code>list-sessions</code> exits 0 on a server with no session and 1 when no server answers.</li>
+  <li>The two hooks hold the sidebar at 30 columns except in a zoomed window, because <code>resize-pane -x</code> unzooms it.</li>
+  <li><code>extended-keys</code> lets Shift+Enter and similar reach Claude Code.</li>
+</ul>
+
+<h2>5. Component: launcher <code>band-new</code></h2>
+<p>Usage: <code>band-new [-n title] [-t tag] [-m model] [-C dir] [--no-attach] [-- command words…]</code>, e.g. <code>band-new -n "fix login" -C ~/code/web-app -- claude</code>. The words after <code>--</code> are joined with single spaces into the command line, which is typed into a shell, so a caller quotes for that shell. With no <code>--</code>, the command line is <code>claude</code>. <code>-C</code> defaults to the current directory; a folder that does not exist is passed through, so a restore of a deleted folder still opens a window (tmux 3.8 opens the pane in <code>$HOME</code> without an error).</p>
+<ol>
+  <li>Resolve <code>TMUX_BIN</code>, <code>NODE_BIN</code> and <code>B</code> (section 3).</li>
+  <li>Title: first non-empty line of <code>-n</code> (else the folder's basename, else <code>session</code>), then <code>optionValue(title, 40)</code> (section 3), then <code>#</code> → <code>##</code>. Tag and model go through <code>optionValue(…, 40)</code> too. <code>optionValue</code> counts code points; implement it with <code>"$NODE_BIN" -e</code> or by importing it from <code>sidebar-core.mjs</code>, not with <code>cut</code>, which counts bytes or characters depending on locale. For a directory containing <code>#</code> or ending in <code>;</code>, skip <code>-c</code> and instead run the tmux command from inside that directory (<code>cd "$dir" &amp;&amp; …</code>), so the window inherits it.</li>
+  <li>If <code>has-session -t =band</code> succeeds: when <code>B/state/conf-sourced</code> is missing or older than <code>B/tmux.conf</code>, run <code>source-file B/tmux.conf</code> and touch <code>conf-sourced</code> (tmux reads <code>-f</code> only at server start, so a config edit otherwise never reaches a running server). Then <code>new-window -d -t band: -n "$title" -c "$dir" -P -F '#{window_id} #{pane_id}'</code>.<br>
+  Otherwise: start the server from a clean environment (section 10, "Server environment") with <code>new-session -d -s band -n "$title" -c "$dir" -x 200 -y 50 -P -F '#{window_id} #{pane_id}'</code>, then touch <code>B/state/server-started</code> and <code>B/state/conf-sourced</code>. (A server that answers <code>list-sessions</code> but has no <code>band</code> session, after its last window closed, takes this branch too; <code>new-session</code> works on it.)</li>
+  <li>Parse <code>@N %M</code> from the output (fail if it doesn't match <code>^@\d+ %\d+$</code>). Then, killing the window if any of these fail:
+    <pre><code>set-option -w -t @N @band_since "$(date +%s)"
+set-option -w -t @N @band_tag   "$tag"      # if given
+set-option -w -t @N @band_model "$model"    # if given
+split-window -d -hb -l 30 -t %M  "$NODE_BIN" B/sidebar.mjs "$TMUX_BIN" "$SOCK"
+send-keys -t %M -l -- "$command_line"</code></pre>
+    Then <code>send-keys -t %M Enter</code>; a failure here is logged, not fatal (the line is typed; retrying would launch twice). The CLI runs in the pane's login shell, so when it exits you get a shell back in that window.</li>
+  <li>Unless <code>--no-attach</code>: if <code>list-clients -t =band -F '#{client_tty}'</code> prints nothing, <code>select-window -t @N</code> and run <code>B/bin/band-attach --no-restore &gt;&amp;2</code> (section 8: it opens one terminal window, with its 10 s guard; its output goes to stderr so stdout carries only <code>@N</code>). If a client is attached, do nothing: the new window appears in the sidebar without taking focus.</li>
+  <li>Print <code>@N</code> on stdout.</li>
+</ol>
+<p>A second account: <code>band-new -t work -- CLAUDE_CONFIG_DIR=~/.claude-work claude</code>. The record hook stores the config dir so a restore resumes under the same account.</p>
+
+<h3>5.1 The <code>band</code> command</h3>
+<p>One entry point over the scripts. It finds its own folder as in section 3. When that folder holds <code>hooks.json</code> it is the installed copy and <code>B</code> is that folder; otherwise it is a package (a checkout, a Homebrew cellar) and <code>B</code> is <code>$BAND_HOME</code>, default <code>~/.local/share/band</code>. Every subcommand except <code>install</code>, <code>doctor</code>, <code>version</code> and <code>help</code> exits 1 with <code>band: not set up yet. Run: band install</code> when <code>B/bin/band-new</code> is missing, and prints a note to stderr when the package's <code>VERSION</code> differs from <code>B/VERSION</code>.</p>
+<div class="scroll"><table>
+<tr><th>Command</th><th>Does</th></tr>
+<tr><td><code>band</code></td><td>With stdin and stdout a TTY and <code>$TMUX</code> unset, this terminal becomes the band window: if no <code>band</code> session exists, offer the lost sessions (<code>Reopen N sessions? [Y/n]</code>, then <code>band-restore --no-attach</code>); if there is still none, <code>band-new --no-attach</code>; then <code>tmux -S SOCK attach -t '=band'</code> in this terminal (a second client is fine). Without a TTY or inside tmux: <code>band-attach</code> when a session or a lost session exists, else <code>band-new</code>.</td></tr>
+<tr><td><code>band new …</code>, <code>band attach …</code>, <code>band restore …</code></td><td><code>band-new</code>, <code>band-attach</code>, <code>band-restore</code> with the same arguments</td></tr>
+<tr><td><code>band install</code></td><td>from a package: the package's <code>install.sh</code> with <code>BAND_NO_LINK=1</code> unless the caller set it (the package manager already put <code>band</code> on <code>PATH</code>). From the installed copy: exit 1 with a line saying to rerun the installer.</td></tr>
+<tr><td><code>band uninstall</code></td><td><code>B/install.sh --uninstall</code>, or the package's when <code>B</code> is gone</td></tr>
+<tr><td><code>band doctor</code></td><td>one line each for tmux (3.3 or newer), node (18 or newer), git, gh, claude, iTerm2, the install and the hooks in <code>~/.claude/settings.json</code>; exit 1 when tmux, node, the install or the hooks are missing</td></tr>
+<tr><td><code>band version</code>, <code>band help</code></td><td>the package's <code>VERSION</code>; the usage text</td></tr>
+</table></div>
+
+<h2>6. Component: hooks</h2>
+<p>Claude Code runs hooks as children of the CLI, which runs in the pane, so <code>$TMUX</code> and <code>$TMUX_PANE</code> are in the hook's environment. Both scripts exit at once outside the band server: the socket path is the part of <code>$TMUX</code> before the first comma, and the check is <code>[ "${TMUX%%,*}" -ef "$SOCK" ]</code> (same file, so <code>/tmp</code> vs <code>/private/tmp</code> spellings match). A hook that prints anything or exits non-zero can change the CLI's behaviour (a PermissionRequest hook's output is read as a decision), so every path exits 0 with no output.</p>
+<p><b>Window lookup must be checked.</b> When the pane is gone (its window was just closed with ✕), tmux 3.8 answers <code>display-message -p -t %&lt;gone&gt; '#{window_id}'</code> with an empty line and exit status 0, and <code>set-option -w -t ""</code> then writes to the <i>current</i> window. Both hooks exit unless the window id matches <code>^@[0-9]+$</code>. Probed 2026-11-17.</p>
+<p>Fields are read from the hook's JSON input with <code>sed</code>. Each key appears once in the input, which is one line; the patterns do not unescape JSON, so a path containing <code>"</code> or <code>\</code> is read wrong (acceptable here).</p>
+
+<h3>6.1 <code>bin/band-state.sh</code>: live state</h3>
+<pre><code>#!/bin/sh
+# band-state.sh &lt;working|input|done|clear&gt;
+# (resolve B and TMUX_BIN as in section 3; on any failure: exit 0)
+SOCK="$B/state/tmux.sock"
+[ -n "$TMUX_PANE" ] &amp;&amp; [ -n "$TMUX" ] || exit 0
+[ "${TMUX%%,*}" -ef "$SOCK" ] || exit 0
+t() { "$TMUX_BIN" -S "$SOCK" "$@" 2&gt;/dev/null; }
+case "$1" in working|input|done|clear) state=$1 ;; *) exit 0 ;; esac
+wait=""
+input=$(cat)
+if [ "$state" = input ]; then
+  tool=$(printf '%s' "$input" | sed -n 's/.*"tool_name" *: *"\([^"]*\)".*/\1/p' | head -n 1)
+  case "$tool" in
+    AskUserQuestion) wait="question" ;;
+    ExitPlanMode)    wait="plan approval" ;;
+    "")              wait="input needed" ;;
+    *)               wait="permission: $tool" ;;
+  esac
+fi
+[ "$state" = clear ] &amp;&amp; state=""
+win=$(t display-message -p -t "$TMUX_PANE" '#{window_id}')
+printf %s "$win" | grep -Eq "^@[0-9]+\$" || exit 0
+# A claude started inside this session (claude -p from a tool call) is not the window's.
+id=$(printf '%s' "$input" | sed -nE 's/.*"session_id" *: *"([0-9a-f-]{36})".*/\1/p' | head -n 1)
+owner=$(t show-options -wqv -t "$win" @band_session)
+[ -n "$owner" ] &amp;&amp; [ -n "$id" ] &amp;&amp; [ "$owner" != "$id" ] &amp;&amp; exit 0
+cur=$(t show-options -wqv -t "$win" @band_state)
+[ "$cur" = seen ] &amp;&amp; [ "$state" = done ] &amp;&amp; state=seen
+if [ "$cur" != "$state" ]; then
+  t set-option -w -t "$win" @band_state "$state" \; set-option -w -t "$win" @band_since "$(date +%s)" &gt;/dev/null
+fi
+t set-option -w -t "$win" @band_wait "$wait" &gt;/dev/null
+exit 0</code></pre>
+<p class="note">The <code>wait</code> values are all under 40 characters except a long tool name; truncate it with <code>optionValue</code> semantics if you like, the sidebar fits it anyway.</p>
+
+<h3>6.2 <code>bin/band-record.sh</code>: the restore record</h3>
+<pre><code>#!/bin/sh
+# band-record.sh &lt;start|end&gt;  (any other argument: exit 0)
+# (resolve B and TMUX_BIN as in section 3; on any failure: exit 0)
+SOCK="$B/state/tmux.sock"; REC="$B/state/sessions"
+[ -n "$TMUX_PANE" ] &amp;&amp; [ -n "$TMUX" ] || exit 0
+[ "${TMUX%%,*}" -ef "$SOCK" ] || exit 0
+case "$1" in start|end) ;; *) exit 0 ;; esac
+t() { "$TMUX_BIN" -S "$SOCK" "$@" 2&gt;/dev/null; }
+input=$(cat)
+UUID="^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\$"
+# The JSON string value of a key, with \" \\ and \/ unescaped.
+field() {
+  printf '%s' "$input" | sed -nE 's/.*"'"$1"'" *: *"((\\.|[^"\\])*)".*/\1/p' | head -n 1 | sed -E 's/\\(["\\/])/\1/g'
+}
+id=$(field session_id)
+printf %s "$id" | grep -Eq "$UUID" || exit 0
+win=$(t display-message -p -t "$TMUX_PANE" '#{window_id}')
+owner=
+printf %s "$win" | grep -Eq "^@[0-9]+\$" &amp;&amp; owner=$(t show-options -wqv -t "$win" @band_session)
+if [ "$1" = end ]; then
+  # The pane outlives an exit typed in it. A pane that is gone means a closed
+  # window (the sidebar removed the record) or a dead server (the record stays).
+  [ -n "$owner" ] &amp;&amp; [ "$owner" = "$id" ] &amp;&amp; rm -f "$REC/$id" 2&gt;/dev/null
+  exit 0
+fi
+printf %s "$win" | grep -Eq "^@[0-9]+\$" || exit 0
+# The CLI's pid: the first ancestor that is not a shell.
+pid=$PPID; n=0
+while [ "$n" -lt 4 ]; do
+  comm=$(ps -o comm= -p "$pid" 2&gt;/dev/null) || break
+  case "${comm##*/}" in
+    sh|bash|zsh|dash|-sh|-bash|-zsh) pid=$(ps -o ppid= -p "$pid" 2&gt;/dev/null | tr -d ' ') ;;
+    *) break ;;
+  esac
+  n=$((n + 1))
+done
+printf %s "$pid" | grep -Eq "^[0-9]+\$" || pid=
+# Another CLI still owns the window: this one was started inside its session.
+if [ -n "$owner" ] &amp;&amp; [ "$owner" != "$id" ]; then
+  held=$(t show-options -wqv -t "$win" @band_pid)
+  if printf %s "$held" | grep -Eq "^[0-9]+\$" &amp;&amp; [ "$held" != "$pid" ] &amp;&amp; kill -0 "$held" 2&gt;/dev/null; then
+    exit 0
+  fi
+  rm -f "$REC/$owner" 2&gt;/dev/null
+fi
+t set-option -w -t "$win" @band_session "$id" \; set-option -w -t "$win" @band_transcript "$(field transcript_path)" \; set-option -w -t "$win" @band_pid "$pid" &gt;/dev/null
+cwd=$(field cwd)
+title=$(t display-message -p -t "$win" '#{window_name}')
+tag=$(t show-options -wqv -t "$win" @band_tag)
+mkdir -p "$REC" 2&gt;/dev/null &amp;&amp; chmod 700 "$REC" 2&gt;/dev/null
+{ printf '%s\n%s\n%s\n%s\n' "$cwd" "$title" "$tag" "${CLAUDE_CONFIG_DIR:-}" &gt; "$REC/$id.tmp"; } 2&gt;/dev/null \
+  &amp;&amp; mv "$REC/$id.tmp" "$REC/$id" 2&gt;/dev/null
+exit 0</code></pre>
+<p class="note"><b>Who owns the window.</b> Hooks run in every process that inherits the pane's environment, so a <code>claude -p</code> started from a tool call fires them too. SessionStart stores the CLI's pid (<code>@band_pid</code>, the first ancestor of the hook that is not a shell) beside its session id; a start from another session is ignored while that pid is alive and is not the caller's own, and the state hook ignores any event whose <code>session_id</code> is not the window's. <code>/clear</code> and compaction keep the pid, so they take the window over; a new CLI started after the first one exited or died does too.</p>
+<p class="note"><b>End without a sleep.</b> SessionEnd hooks get about 1.5 s. The pane outlives an exit typed in it, so <code>end</code> removes the record only when the pane still exists and the window is this session's. A pane that is gone means the window was closed (the sidebar removed the record first) or the server died (no answer, the record stays and is offered for restore). <code>--resume</code> fires SessionStart with the same id and rewrites the record. Verified with Claude Code 2.1.x on 2026-11-18: SessionStart wrote the id, pid and record; UserPromptSubmit, Stop, PermissionRequest (<code>permission: Bash</code>) and PostToolUse set the states; a nested <code>claude -p</code> left the window with its parent; <code>/exit</code> and ✕ removed the record; <code>kill-server</code> kept it.</p>
+
+<h3>6.3 <code>B/hooks.json</code> (and the block the installer merges into settings)</h3>
+<pre><code>{
+  "hooks": {
+    "SessionStart":      [{ "hooks": [{ "type": "command", "command": "[ ! -x B/bin/band-record.sh ] || B/bin/band-record.sh start", "timeout": 5 }] }],
+    "UserPromptSubmit":  [{ "hooks": [{ "type": "command", "command": "[ ! -x B/bin/band-state.sh ] || B/bin/band-state.sh working", "timeout": 5 }] }],
+    "PermissionRequest": [{ "matcher": "*", "hooks": [{ "type": "command", "command": "[ ! -x B/bin/band-state.sh ] || B/bin/band-state.sh input", "timeout": 5 }] }],
+    "PostToolUse":       [{ "matcher": "*", "hooks": [{ "type": "command", "command": "[ ! -x B/bin/band-state.sh ] || B/bin/band-state.sh working", "timeout": 5 }] }],
+    "Stop":              [{ "hooks": [{ "type": "command", "command": "[ ! -x B/bin/band-state.sh ] || B/bin/band-state.sh done", "timeout": 5 }] }],
+    "SessionEnd":        [{ "hooks": [{ "type": "command", "command": "[ ! -x B/bin/band-state.sh ] || B/bin/band-state.sh clear", "timeout": 5 },
+                                      { "type": "command", "command": "[ ! -x B/bin/band-record.sh ] || B/bin/band-record.sh end", "timeout": 5 }] }]
+  }
+}</code></pre>
+<p class="note"><code>B</code> is replaced by the absolute install path. The <code>[ ! -x … ] ||</code> guard makes every hook a silent no-op once the install folder is deleted; without it each event in every Claude Code session on the machine would fail with "not found". The 5 s timeout bounds a tmux server that stopped answering. PermissionRequest fires for permission dialogs, the plan-approval dialog and AskUserQuestion; PostToolUse clears <code>input</code> once a dialog is answered and the tool runs. Do not hook <code>Notification idle_prompt</code> to <code>input</code>: it fires about a minute after every finished turn and would turn every done session orange.</p>
+
+<h3>6.4 Installer <code>install.sh</code></h3>
+<ul>
+  <li><code>BAND_HOME</code> (default <code>~/.local/share/band</code>) is <code>B</code>. Copy the files in (skip the copy when the source is <code>B</code> itself, so <code>B/install.sh</code> can re-run; copy each file to a temp name and rename it over, because a hook may be running the old one), <code>chmod +x</code> the scripts, write <code>hooks.json</code> with absolute paths.</li>
+  <li>Unless <code>BAND_NO_LINK=1</code>: symlink <code>B/bin/band</code>, <code>band-new</code>, <code>band-attach</code> and <code>band-restore</code> into <code>~/.local/bin</code> (not the two hook scripts). A regular file already there under one of those names is left alone with a warning.</li>
+  <li>Unless <code>BAND_NO_SETTINGS=1</code>: merge into <code>~/.claude/settings.json</code> (created as <code>{}</code> when <code>~/.claude</code> exists and the file does not), each <code>~/.claude-*/settings.json</code> that exists, and <code>$CLAUDE_CONFIG_DIR/settings.json</code> when that is set and exists. The merge first removes every band hook already there (any command naming <code>/bin/band-state.sh</code> or <code>/bin/band-record.sh</code>, from any install folder and any version), then appends the entries of <code>hooks.json</code>; other hooks and keys are untouched, and a second install changes nothing. When the result differs from the file: copy the file to <code>settings.json.bak-&lt;epoch&gt;</code> (unless that name exists), write the new content to a temp file beside the real file (resolve a symlink first) and rename it over. An empty file counts as <code>{}</code>. A file that is not valid JSON, or whose <code>hooks</code> is not an object of arrays, is left alone and the installer exits 1 after handling the others. Print one line per file changed; when no settings file was found, say that no hooks were added. Do the JSON work in Node; put that code in an installed file (<code>B/hooks.mjs</code>).</li>
+  <li>Delete <code>B/state/conf-sourced</code> so a running server re-sources the new config on the next <code>band-new</code>.</li>
+  <li>Hook command paths are written shell-quoted when they contain characters outside <code>[A-Za-z0-9_./-]</code>.</li>
+  <li><code>install.sh --uninstall</code> removes every band hook (same match as above), drops entries, event arrays and a <code>hooks</code> object it left empty, removes only symlinks in <code>~/.local/bin</code> that point into <code>B/bin</code>, honours both <code>BAND_NO_*</code> flags, and leaves <code>B</code> in place. It works when <code>B</code> has already been deleted, using the <code>hooks.mjs</code> beside the script.</li>
+</ul>
+
+<h2>7. Component: the sidebar (<code>B/sidebar.mjs</code> + <code>B/sidebar-core.mjs</code>)</h2>
+<p>Invocation: <code>node B/sidebar.mjs &lt;tmux bin&gt; &lt;socket&gt;</code>, inside a tmux pane (<code>$TMUX_PANE</code> set). Missing argument or pane: print usage to stderr and exit 2. One process per window: tmux cannot show one pane in several windows, so each window runs its own copy, and they agree because they all read the same options. Every tmux call is <code>&lt;bin&gt; -S &lt;socket&gt; …</code> with a 3 s timeout; a failure returns null, never throws.</p>
+<p><code>sidebar-core.mjs</code> is pure (no I/O). Its exports and shapes:</p>
+<div class="scroll"><table>
+<tr><th>Export</th><th>Signature → result</th></tr>
+<tr><td><code>parseWindows</code></td><td><code>(listWindowsStdout) → [{ id, active, state, tag, since, wait, model, repo, pr, name }]</code></td></tr>
+<tr><td><code>render</code>, <code>renderTable</code></td><td><code>({ rows, width, height, confirm = null, now = 0 }) → string</code>, lines joined with <code>\n</code>; <code>confirm</code> is a window id; <code>now</code> in epoch seconds</td></tr>
+<tr><td><code>layout</code></td><td><code>({ rows, height }) → [{ row, top }]</code></td></tr>
+<tr><td><code>newLine</code></td><td><code>({ rows, height }) → number</code>, the 1-based line of <code>+ new session</code></td></tr>
+<tr><td><code>tableLayout</code></td><td><code>({ rows, height }) → [{ row, y }]</code></td></tr>
+<tr><td><code>tableRows</code></td><td><code>(rows) → rows</code> sorted</td></tr>
+<tr><td><code>hit</code>, <code>hitTable</code></td><td><code>({ x, y, rows, width, height, confirm }) → { kind, id }</code>; kind is <code>expand</code>, <code>collapse</code>, <code>select</code>, <code>close</code>, <code>yes</code>, <code>no</code>, <code>new</code> (normal view only) or <code>none</code>; id is the window id or null</td></tr>
+<tr><td><code>needsConfirm</code></td><td><code>(state) → boolean</code></td></tr>
+<tr><td><code>age</code></td><td><code>(now, since) → string</code></td></tr>
+<tr><td><code>repoLabel</code></td><td><code>(rev, cwd) → string</code></td></tr>
+<tr><td><code>fit</code>, <code>textWidth</code></td><td><code>(s, width) → string</code>, <code>(s) → number</code></td></tr>
+<tr><td><code>optionValue</code></td><td><code>(s, max = 40) → string</code> (section 3)</td></tr>
+<tr><td><code>parsePrs</code>, <code>prValue</code></td><td><code>(value) → [{ number: Number, state, ci }]</code>, <code>(prs) → string</code></td></tr>
+<tr><td><code>prBadge</code>, <code>prCell</code></td><td><code>(prs) → { text, color } | null</code>, <code>(prs) → { text, color }</code></td></tr>
+</table></div>
+
+<h3>7.1 Constants and looks</h3>
+<div class="scroll"><table>
+<tr><th>Name</th><th>Value</th></tr>
+<tr><td>sidebar width</td><td>30</td></tr>
+<tr><td>header lines / lines per row / table header lines</td><td>2 / 4 / 3</td></tr>
+<tr><td>new-session text / lines</td><td><code> + new session</code> (14 columns) / 2 (a blank spacer, then the text)</td></tr>
+<tr><td>close columns / expand columns</td><td>3 (<code> ✕ </code>) / 2 (<code>⤢ </code>)</td></tr>
+<tr><td>confirm text</td><td><code> Close?  yes   no</code>; yes = columns 10–12, no = 16–17</td></tr>
+<tr><td>collapse text</td><td><code>⤡ collapse </code> (11 columns)</td></tr>
+<tr><td>dim / active background</td><td>256-color 244 / 237</td></tr>
+<tr><td>badge minimum room</td><td>12</td></tr>
+<tr><td>max PRs per window</td><td>3</td></tr>
+</table></div>
+<div class="scroll"><table>
+<tr><th>State</th><th>Mark</th><th>Color</th><th>Label</th></tr>
+<tr><td><code>input</code></td><td>●</td><td>214</td><td>needs input</td></tr>
+<tr><td><code>done</code></td><td>✓</td><td>71</td><td>done</td></tr>
+<tr><td><code>working</code></td><td>◌</td><td>75</td><td>working</td></tr>
+<tr><td><code>seen</code></td><td>✓</td><td>244</td><td>(none)</td></tr>
+<tr><td>anything else</td><td>·</td><td>244</td><td>(none)</td></tr>
+</table></div>
+<div class="scroll"><table>
+<tr><th>PR</th><th>Mark</th><th>Color</th><th>Word</th></tr>
+<tr><td>open, CI <code>p</code></td><td>✓</td><td>71</td><td>passing</td></tr>
+<tr><td>open, CI <code>f</code></td><td>✗</td><td>203</td><td>failing</td></tr>
+<tr><td>open, CI <code>r</code></td><td>◌</td><td>75</td><td>running</td></tr>
+<tr><td>open, no CI</td><td>(none)</td><td>244</td><td>open</td></tr>
+<tr><td>merged <code>m</code></td><td>(none)</td><td>141</td><td>merged</td></tr>
+<tr><td>closed <code>c</code></td><td>(none)</td><td>244</td><td>closed</td></tr>
+</table></div>
+
+<h3>7.2 Helpers (exact)</h3>
+<ul>
+  <li><b>Escapes.</b> <code>fg(n, s)</code> = <code>ESC[38;5;{n}m</code> + s + <code>ESC[39m</code>. <code>bold(s)</code> = <code>ESC[1m</code> + s + <code>ESC[22m</code>. Active row background = <code>ESC[48;5;237m</code> at the start of each of the row's three content lines; every content line (active or not) ends with <code>ESC[0m</code>.</li>
+  <li><b>charWidth(cp)</b>: 0 for U+0300–036F, U+200B–200F, U+FE00–FE0F. 2 for U+1100–115F, U+2E80–A4CF, U+AC00–D7A3, U+F900–FAFF, U+FE30–FE4F, U+FF00–FF60, U+FFE0–FFE6, U+1F300–1FAFF, U+20000–3FFFD. Else 1. <code>textWidth</code> sums over code points.</li>
+  <li><b>fit(s, w)</b>: <code>w ≤ 0</code> → empty. If <code>textWidth(s) ≤ w</code>: s padded with spaces to w. Else take code points while the running width plus the next one's width ≤ w − 1, append <code>…</code>, pad with spaces to w.</li>
+  <li><b>age(now, since)</b>: empty if either is 0 or <code>now &lt; since</code>; under 60 s <code>now</code>; under 3600 <code>⌊s/60⌋m</code>; under 86400 <code>⌊s/3600⌋h</code>; else <code>⌊s/86400⌋d</code>.</li>
+  <li><b>stateText(row)</b> = [label, age] without empties, joined by one space.</li>
+  <li><b>repoLabel(rev, cwd)</b>: <code>rev</code> is the output of <code>git -C cwd rev-parse --path-format=absolute --git-common-dir --abbrev-ref HEAD</code> (null on failure). Split it on newline into common dir and branch. If the common dir is missing or not absolute: <code>basename(cwd)</code>. Repo = basename of its parent when the common dir's basename is <code>.git</code> (worktrees show the main repo), else its basename minus a trailing <code>.git</code>. Result <code>repo · branch</code>, with branch <code>detached</code> when empty or <code>HEAD</code>.</li>
+  <li><b>needsConfirm(state)</b> = state is neither <code>done</code> nor <code>seen</code>.</li>
+</ul>
+
+<h3>7.3 Normal view: <code>layout</code>, <code>render</code>, <code>hit</code></h3>
+<ul>
+  <li><b>layout({rows, height})</b>: capacity = max(0, ⌊(height − 2 − 2)/4⌋) (the last 2 are kept for the new-session line); activeAt = index of the active row, or 0; start = 0 if all fit, else max(0, min(activeAt − capacity + 1, n − capacity)). Returns <code>{ row, top }</code> for rows start…start+capacity−1, where <code>top = 3 + 4i</code> is the 1-based line of the row's blank spacer.</li>
+  <li><b>Line 1</b>: if width &gt; 7, <code>bold(fit(' band', width − 2)) + fg(244, '⤢ ')</code>; else <code>bold(fit(' band', width))</code>.</li>
+  <li><b>Line 2</b>: <code>fg(244, fit(text, width))</code>, text <code> 1 needs input</code>, <code> N need input</code>, or <code> nothing waiting</code>.</li>
+  <li><b>Per row</b>, four lines:
+    <ol>
+      <li><code>fit('', width)</code> (no escapes).</li>
+      <li>Title. If width &gt; 6: <code>' ' + fg(color, mark) + ' ' + (active ? bold(name) : name) + fg(244, ' ✕ ')</code> with <code>name = fit(row.name, width − 6)</code>; else <code>fit('', width)</code>. Prefixed with the active background, suffixed <code>ESC[0m</code>.</li>
+      <li>State. When confirming this row: <code>fit(' Close?  yes   no', width)</code>. Else: <code>label = '   ' + stateText</code>; <code>tag = row.tag ? ' ' + row.tag : ''</code>; <code>badge = prBadge(parsePrs(row.pr))</code>; <code>badgeText = badge &amp;&amp; width − textWidth(badge.text) − 2 ≥ 12 ? ' ' + badge.text + ' ' : ''</code>; <code>text = fit(label + tag, width − textWidth(badgeText))</code>; output <code>fg(color, text.slice(0, label.length)) + fg(244, text.slice(label.length)) + (badgeText ? fg(badge.color, badgeText) : '')</code> (slice by UTF-16 units). Same prefix/suffix.</li>
+      <li><code>fg(244, fit('   ' + row.repo, width))</code>, same prefix/suffix.</li>
+    </ol></li>
+  <li><b>After the rows</b>: <code>fit('', width)</code>, then <code>fg(244, fit(' + new session', width))</code>, neither with a background or <code>ESC[0m</code>. <code>newLine</code> = 2 + 4 × (rows laid out) + 2, the line this text lands on.</li>
+  <li>Return the first <code>height</code> lines.</li>
+  <li><b>hit({x, y, …})</b> (1-based): <code>y = 1</code> and <code>x &gt; width − 3</code> → <code>expand</code>. <code>y = newLine</code> and <code>x ≤ 14</code> → <code>new</code>. Else find the laid-out row with <code>top ≤ y &lt; top + 4</code>; <code>line = y − top</code>. If confirming that row and line is 2: yes (x 10–12), no (16–17), else none. Line 1 and <code>x &gt; width − 3</code> → <code>close</code>. Any other line of the row, the spacer included → <code>select</code>. No row → <code>none</code>.</li>
+</ul>
+
+<h3>7.4 Table view: <code>tableRows</code>, <code>renderTable</code>, <code>hitTable</code></h3>
+<ul>
+  <li><b>Columns</b> in order: STATE 19, SESSION 16 (flex), REPO · BRANCH 30, PR · CI 28, WAITING ON 20, MODEL · MODE 20. Drop columns from the right while more than two remain and <code>1 + Σwidths + 3 &gt; width</code>. Then SESSION's width becomes <code>max(16, 16 + width − total)</code>, where total = <code>1 + Σwidths + 3</code> over the columns kept. A table narrower than the two kept columns (39) is drawn wider than the pane, not clipped. <code>renderTable</code> also returns only the first <code>height</code> lines. <code>id</code> is null for none, expand and collapse, and the confirming row for yes and no.</li>
+  <li><b>tableRows</b>: rank input 0, working 1, empty 1, done 2, seen 3, unknown 1. Sort by rank; among <code>input</code> rows by <code>since</code> ascending (0 counts as infinity); ties keep tmux order.</li>
+  <li><b>tableLayout</b>: capacity = max(0, height − 3); same start rule as <code>layout</code> on the sorted list; row <code>i</code> is on line <code>4 + i</code>.</li>
+  <li><b>Line 1</b>: summary <code> band   N session(s), M need(s) input</code> (<code>1 session</code>, <code>1 needs</code>). If width &gt; 17: <code>bold(fit(summary, width − 11)) + fg(244, '⤡ collapse ')</code>; else <code>bold(fit(summary, width))</code>. <b>Line 2</b>: <code>fit('', width)</code>. <b>Line 3</b>: <code>fg(244, fit(' ' + titles each fit to its width, joined, width))</code>.</li>
+  <li><b>Rows</b>: confirming → background + <code>fit(' Close?  yes   no', width)</code> + <code>ESC[0m</code>. Else background + <code>' '</code> + cells + spaces to fill <code>max(0, width − (1 + Σwidths) − 3)</code> + <code>fg(244, ' ✕ ')</code> + <code>ESC[0m</code>. Cells at column width w:
+    <ul>
+      <li>state: <code>fg(color, fit(mark + ' ' + stateText, w))</code></li>
+      <li>session: <code>(active ? bold(fit(name, w − 1)) : fit(name, w − 1)) + ' '</code></li>
+      <li>repo: <code>fit(repo, w − 1) + ' '</code></li>
+      <li>PR: <code>fg(cell.color, fit(cell.text, w − 1) + ' ')</code> with <code>cell = prCell(parsePrs(row.pr))</code></li>
+      <li>waiting: <code>fg(state color, fit(wait, w − 1) + ' ')</code></li>
+      <li>model: <code>fg(244, fit(model, w))</code></li>
+    </ul></li>
+  <li><b>hitTable</b>: line 1 → <code>collapse</code> when <code>x &gt; width − 11</code>, else none. A row's line: confirming → yes/no/none as above; <code>x &gt; width − 3</code> → close; else select.</li>
+</ul>
+
+<h3>7.5 PR helpers</h3>
+<ul>
+  <li><b>parsePrs(value)</b>: split on <code>,</code>, keep items matching <code>^([1-9]\d{0,8}):([omc]):([pfr]?)$</code>, first 3, as <code>{ number, state, ci }</code>. <b>prValue(prs)</b> is the inverse (same filter and cap).</li>
+  <li><b>lead PR</b>: among open PRs, the first with CI <code>f</code>, else the first with <code>r</code>, else with <code>p</code>, else with no CI; so any open PR leads over merged or closed ones. With no open PR, the last PR in the list.</li>
+  <li><b>prColor(pr)</b>: merged 141, closed 244, else the CI color, else 244.</li>
+  <li><b>prBadge(prs)</b>: null when empty. Text = <code>#&lt;lead number&gt;</code> + (<code>+&lt;n−1&gt;</code> when n &gt; 1) + (<code>' ' + mark</code> for an open lead with CI, <code>' merged'</code>/<code>' closed'</code> for a closed lead, nothing for an open lead without CI). Color = prColor(lead).</li>
+  <li><b>prCell(prs)</b>: text = each PR as <code>#&lt;n&gt; &lt;word&gt;</code> joined by <code>, </code>; color = prColor(lead); empty text and 244 when none.</li>
+</ul>
+
+<h3>7.6 The program loop (<code>sidebar.mjs</code>)</h3>
+<p><b>Start:</b> write <code>ESC[?1000h ESC[?1006h ESC[?25l</code>; stdin raw mode (when a TTY), UTF-8. <b>Exit</b> (SIGHUP, SIGTERM, SIGINT, stdin end, or the quit conditions below): write <code>ESC[?1006l ESC[?1000l ESC[?25h ESC[0m</code>, leave raw mode, exit 0. Size = <code>stdout.columns || 30</code> by <code>stdout.rows || 24</code>. Start a 1 s interval running <code>tick</code>, and run one tick at once.</p>
+<p><b>tick</b> (skip if a tick is in progress):</p>
+<ol>
+  <li>Remember <code>epoch = zoomEpoch</code>. <code>display-message -p -t $TMUX_PANE '#{window_id}\t#{pane_width}\t#{window_panes}\t#{session_attached}\t#{window_active}\t#{window_zoomed_flag}'</code>. On failure count it; at 3 consecutive failures quit; return. A window id that does not match <code>^@\d+$</code> is a failure too: for a pane that is gone, tmux 3.8 prints an empty line and exits 0. Else reset the count.</li>
+  <li><code>ownWindow</code> = window id. If <code>epoch === zoomEpoch</code>, <code>zoomed = flag === '1'</code>.</li>
+  <li>If <code>window_panes</code> is 1: quit (the CLI pane is gone; exiting closes the window).</li>
+  <li>If zoomed and the window is not active: <code>setZoom(false)</code>.</li>
+  <li>If not zoomed, width ≠ 30, and this process's last <code>resize-pane</code> was ≥ 500 ms ago: <code>resize-pane -t $TMUX_PANE -x 30</code>.</li>
+  <li>Repo counter: on its values 0, 5, 10, … (it counts ticks that reach this step, starting at 0) run <b>noteRepo</b>: read <code>#{pane_current_path}</code> of <code>&lt;ownWindow&gt;.1</code>; if non-empty run the git command from <code>repoLabel</code> (2 s timeout); <code>label = optionValue(repoLabel(rev, cwd), 60)</code>; write <code>@band_repo</code> only when it differs from the last value written successfully.</li>
+  <li>Kick the PR poller (7.7) without awaiting it.</li>
+  <li>If the window is not active: return unless the inactive counter is at 0, 5, 10, … (a separate counter, incremented on each inactive tick, reset to 0 whenever the window is active).</li>
+  <li><code>list-windows</code> (section 3) and <code>parseWindows</code>; keep the old rows if the call fails. Note the own row's state for the PR poller's "became done" trigger.</li>
+  <li>If this window's row has state <code>done</code>, the window is active, <code>session_attached</code> &gt; 0, and not zoomed: write <code>@band_state seen</code> and set the row's state locally. <code>@band_since</code> is not stamped on this change, so a seen row keeps the time it finished.</li>
+  <li>If the confirming row no longer exists, clear the confirmation. <code>draw()</code>.</li>
+</ol>
+<p class="note">Kept from the reference build, and pinned by the vectors: the table title says <code> 0 need input</code> while the normal view says <code> nothing waiting</code>; the expand hit zone is the last 3 columns although <code>⤢ </code> draws in 2; the expand and collapse hit zones exist even at widths where their glyphs are not drawn.</p>
+<p><b>draw:</b> render with <code>now = ⌊Date.now()/1000⌋</code> (table when zoomed). If <code>zoomed:width:height</code> changed since the last draw, prefix <code>ESC[2J</code>. Write each line <code>i</code> at <code>ESC[{i+1};1H</code>; if fewer lines than height, follow with <code>ESC[{n+1};1H ESC[J</code>. Also redraw on stdout resize.</p>
+<p><b>setZoom(on):</b> <code>zoomEpoch++</code>; <code>zoomed = on</code>; <code>if-shell -F -t $TMUX_PANE '#{==:#{window_zoomed_flag},&lt;on ? 0 : 1&gt;}' 'resize-pane -Z -t $TMUX_PANE'</code>. (<code>resize-pane -Z</code> toggles; the epoch stops a tick that read the flag before the click from writing it back.) <b>focusSession(w)</b> = <code>select-pane -t &lt;w&gt;.1</code>.</p>
+<p><b>Click timing.</b> Hit-testing uses stdout's size, which can lag tmux's pane size for a moment after a zoom change, and a tick that started after a click can read the zoom flag before the zoom command lands. The reference build accepts both; a build may also ignore the zoom flag from any tick that overlaps a zoom command (count zoom commands in flight and bump the epoch again when one returns).</p>
+<p><b>stdin:</b> find every <code>ESC [ &lt; b ; x ; y (M|m)</code> in the chunk. For each with <code>M</code> and <code>b = 0</code>, run <code>click(x, y)</code>. A chunk with no mouse sequence at all is a keypress: <code>zoomEpoch++</code>, <code>zoomed = false</code>, <code>focusSession(ownWindow)</code> (selecting the CLI pane unzooms the window).</p>
+<p><b>click(x, y):</b> hit-test with <code>hitTable</code> when zoomed, else <code>hit</code>. Then:</p>
+<div class="scroll"><table>
+<tr><th>Result</th><th>Action</th></tr>
+<tr><td>expand</td><td>clear confirm; <code>setZoom(true)</code></td></tr>
+<tr><td>collapse</td><td>clear confirm; <code>setZoom(false)</code>; <code>focusSession(ownWindow)</code></td></tr>
+<tr><td>select</td><td>clear confirm; <code>setZoom(false)</code>; <code>select-window -t &lt;id&gt;</code>; <code>focusSession(id)</code></td></tr>
+<tr><td>close, and the row needs confirm</td><td><code>confirm = id</code></td></tr>
+<tr><td>close (no confirm needed) or yes</td><td>clear confirm; <b>closeWindow(id)</b></td></tr>
+<tr><td>no</td><td>clear confirm</td></tr>
+<tr><td>new, and no new window is already opening</td><td>clear confirm; <b>newWindow()</b></td></tr>
+</table></div>
+<p><b>newWindow()</b>: read <code>#{pane_current_path}</code> of <code>&lt;ownWindow&gt;.1</code>. <code>new-window -t =band: -n terminal [-c &lt;dir&gt;] -P -F '#{window_id} #{pane_id}'</code>, without <code>-d</code> so it becomes the current window; skip <code>-c</code> when the folder is empty, contains <code>#</code> or ends in <code>;</code>, as <code>band-new</code> does (section 5). Parse <code>@N %M</code>; on no match return. <code>set-option -w -t @N @band_since &lt;epoch seconds&gt;</code>. <code>split-window -d -hb -l 30 -t %M &lt;node&gt; &lt;this script&gt; &lt;tmux bin&gt; &lt;socket&gt;</code> (<code>process.execPath</code> and <code>process.argv[1]</code>); if it fails, <code>kill-window -t @N</code>. Nothing is typed: pane 1 is the server's default shell, left at its prompt. A press that arrives while a <code>newWindow()</code> is running is ignored, so a double-click opens one window. A CLI started in that shell later is picked up by the hooks like any other, since they key on <code>$TMUX_PANE</code>'s window; the shell window writes no restore record until a CLI's SessionStart runs.</p>
+<p>After it, when not zoomed and the result was not select, collapse or new, <code>focusSession(ownWindow)</code>. Then await a tick and draw. <b>closeWindow(id)</b> = read <code>show-options -wqv -t id @band_session</code>; when it matches <code>^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$</code> delete <code>B/state/sessions/&lt;uuid&gt;</code> (find <code>B</code> from <code>dirname(socket)/..</code>); then <code>kill-window -t id</code>. Deleting the record first keeps a closed session out of a later restore even if its SessionEnd hook never runs.</p>
+
+<h3>7.7 PR poller (inside each sidebar, for its own window)</h3>
+<ul>
+  <li><b>When:</b> at most one poll runs at a time. Nothing happens while the own window has no <code>@band_transcript</code> (read it each kick). A poll starts when none has run yet for the current transcript path, when 180 s have passed since the last poll, or when a "became done" trigger is pending and 30 s have passed since the last poll. A trigger becomes pending when the own row's state read in step 9 is <code>done</code> and the previous read was something else (the first read never triggers); it clears when a poll starts.</li>
+  <li><b>URLs:</b> read the transcript JSONL from the last byte offset consumed (start at 0; restart at 0, with an empty URL list, when the path changes or the file is now shorter than the offset). Consume complete lines only; a trailing partial line waits for the next poll. For each line that parses as JSON: from <code>type: "assistant"</code> entries, every <code>message.content[]</code> item with <code>type: "text"</code>; from <code>type: "user"</code> entries, every <code>message.content[]</code> item with <code>type: "tool_result"</code> (its <code>content</code> is a string or an array of <code>{type: "text", text}</code>). Match <code>/(?&lt;=^|[\s([])https:\/\/github\.com\/[\w.-]+\/[\w.-]+\/pull\/\d+/g</code>. Keep unique URLs in first-seen order, at most 10: when an eleventh arrives, drop the oldest. The window's PRs are the last 3 of the list. One poll reads at most 8 MB of the transcript and the next continues from the offset; a single line longer than that is skipped.</li>
+  <li><b>Fetch:</b> for each of the window's 3 URLs whose cached entry is missing, or not merged and at least 180 s old: <code>gh pr view &lt;url&gt; --json state,statusCheckRollup</code> (10 s timeout). <code>state</code> OPEN/MERGED/CLOSED → o/m/c. CI from <code>statusCheckRollup</code> (each item has <code>conclusion</code>, empty while running, or <code>state</code>): any of FAILURE, ERROR, TIMED_OUT, CANCELLED, ACTION_REQUIRED, STARTUP_FAILURE → <code>f</code>; else any item that is not SUCCESS, NEUTRAL or SKIPPED → <code>r</code>; else <code>p</code> if there are items, else empty. On a gh failure stop fetching for this poll (append one line to <code>B/state/sidebar.log</code> the first time per process) and go on to the write.</li>
+  <li><b>Write:</b> the window's PRs with a cache entry that is merged or under 15 min old, in list order, as <code>prValue</code>, through <code>optionValue(v, 60)</code> with <code>#</code> removed, into <code>@band_pr</code>, only when it differs from the last value this process wrote (initially none, so the first poll writes even an empty value).</li>
+</ul>
+
+<h2>8. Component: <code>band-attach</code> (focus the iTerm window)</h2>
+<p>Closing the terminal window only detaches, so the usual way back is <code>band-attach</code> (bind it to a global hotkey with Raycast, Hammerspoon or skhd). It finds the iTerm tab that already shows the session by tty and raises it, so you never get a second client.</p>
+<ol>
+  <li>Unless <code>--no-restore</code>: N = number of lines from <code>band-restore --list</code>. If N &gt; 0: with <code>--restore</code>, or when stdin is a TTY and the answer to <code>Reopen 1 session? [Y/n]</code> / <code>Reopen N sessions? [Y/n]</code> is empty or starts with y/Y (EOF counts as no), run <code>band-restore --no-attach</code>. No TTY and no flag means skip.</li>
+  <li>If <code>has-session -t =band</code> fails, print <code>no band session</code> and exit 0.</li>
+  <li>If iTerm2 is installed (<code>/Applications/iTerm.app</code> or <code>~/Applications/iTerm.app</code> exists; never run a <code>tell application "iTerm2"</code> without this check, since macOS then asks the user to locate the app): for each line of <code>list-clients -t =band -F '#{client_tty}'</code> matching <code>^/dev/ttys[0-9]{1,4}$</code>, run the focus script with that tty. The first one that prints <code>ok</code> wins; exit 0.</li>
+  <li>Otherwise (no client, a client outside iTerm2, or no iTerm2): if <code>attach-at</code> is younger than 10 s exit 0; else touch it and open one terminal window on the attach line.</li>
+</ol>
+<p>The osascript binary is <code>${BAND_OSASCRIPT:-osascript}</code>, so tests can stub it.</p>
+<p>Focus script (<code>osascript -e "$script"</code>):</p>
+<pre><code>tell application "iTerm2"
+  repeat with w in windows
+    repeat with t in tabs of w
+      repeat with s in sessions of t
+        if tty of s is "/dev/ttys012" then
+          tell t to select
+          tell s to select
+          tell w to select
+          activate
+          return "ok"
+        end if
+      end repeat
+    end repeat
+  end repeat
+  return "none"
+end tell</code></pre>
+<p>Opening a terminal window on the attach line (escape <code>\</code> and <code>"</code> in the line for AppleScript):</p>
+<pre><code># attach line; quote the target: zsh expands a bare =band to the path of a command named band
+'/opt/homebrew/bin/tmux' -S '&lt;B&gt;/state/tmux.sock' attach -t '=band'
+
+tell application "iTerm2"
+  set w to (create window with default profile)
+  tell current session of w to write text "&lt;attach line&gt;"
+  activate
+end tell</code></pre>
+<ul>
+  <li>iTerm2 not installed (macOS): <code>tell application "Terminal" to do script "&lt;attach line&gt;"</code> then <code>activate</code>. Linux (no <code>osascript</code>): print the attach line for the user to run, whether or not a client is attached.</li>
+  <li>The first run triggers macOS's "allow to control iTerm2" prompt for whatever app runs the script.</li>
+</ul>
+
+<h2>9. Component: <code>band-restore</code> (after the tmux server dies)</h2>
+<p>A dead tmux server takes every pane's process with it, so each session ends together. The record hook keeps a session's record when no server answers at its end; a close (✕, <code>/exit</code>, closing the last window) happens on a live server and removes it. A reboot leaves every record with no server running.</p>
+<pre><code>#!/bin/sh
+# band-restore [--no-attach | --list]: reopen up to 12 sessions a previous tmux server took with it.
+# (resolve B and TMUX_BIN as in section 3)
+D="$B/state"; SOCK="$D/tmux.sock"; REC="$D/sessions"; MARK="$D/server-started"
+UUID="^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\$"
+[ -d "$REC" ] || exit 0
+find "$REC" -type f -mmin +1440 -delete
+if "$TMUX_BIN" -S "$SOCK" list-sessions &gt;/dev/null 2&gt;&amp;1; then
+  live=$("$TMUX_BIN" -S "$SOCK" list-windows -a -F '#{@band_session}')
+  for f in $(find "$REC" -type f -newer "$MARK" -exec basename {} \;); do
+    printf '%s\n' "$live" | grep -qx "$f" || rm -f "$REC/$f"
+  done
+  lost=$(find "$REC" -type f ! -newer "$MARK" -exec ls -tr {} + 2&gt;/dev/null | xargs -n1 basename 2&gt;/dev/null)
+else
+  lost=$(ls -tr "$REC")
+fi
+if [ "$1" = --list ]; then
+  for id in $lost; do
+    printf %s "$id" | grep -Eq "$UUID" &amp;&amp; printf '%s\n' "$id"
+  done
+  exit 0
+fi
+q() { printf "'%s'" "$(printf '%s' "$1" | sed "s/'/'\\\\''/g")"; }
+n=0
+for id in $lost; do
+  printf %s "$id" | grep -Eq "$UUID" || continue
+  { IFS= read -r cwd; IFS= read -r title; IFS= read -r tag; IFS= read -r cfg; } &lt; "$REC/$id"
+  cmd="claude --resume $id"
+  [ -n "$cfg" ] &amp;&amp; cmd="CLAUDE_CONFIG_DIR=$(q "$cfg") $cmd"
+  "$B/bin/band-new" --no-attach -n "$title" ${tag:+-t "$tag"} -C "$cwd" -- "$cmd" &gt;/dev/null &amp;&amp; rm -f "$REC/$id"
+  n=$((n + 1)); [ "$n" -ge 12 ] &amp;&amp; break
+done
+[ "$1" = --no-attach ] || [ "$n" -eq 0 ] || "$B/bin/band-attach" --no-restore</code></pre>
+<ul>
+  <li><b>Lost vs current</b> uses the <code>server-started</code> marker, so restore also works after a new server has started (e.g. <code>band-new</code> ran before <code>band-attach</code>): older records stay lost instead of being pruned as stale. <code>band-attach</code> counts lost records with <code>band-restore --list</code>.</li>
+  <li>Oldest first, at most 12 per run; the rest stay for the next run. Each relaunch fires SessionStart with the same id, which rewrites the record as current.</li>
+  <li>A session whose transcript is gone fails <code>--resume</code> in its pane; the window shows the error and can be closed with ✕.</li>
+  <li>Only the account (<code>CLAUDE_CONFIG_DIR</code>) carries over. Other launch flags (<code>--model</code>, <code>--permission-mode</code>, <code>--settings</code>) are not recorded, so the resumed session starts with the CLI defaults.</li>
+  <li>Records lost for over 24 h are dropped, so a restore after a reboot works within a day.</li>
+  <li><code>TMUX_BIN</code> above is resolved as in section 3; <code>xargs -n1 basename</code> on an empty list prints nothing.</li>
+</ul>
+
+<h3>Left to the builder</h3>
+<p>These do not change what the user sees, and either choice conforms: how <code>band-new</code> parses unknown flags (exit 2 is fine); whether a same-second config edit is re-sourced; where the attach prompt is printed; whether <code>noteRepo</code> is awaited; the CLI of <code>hooks.mjs</code>; backups on uninstall; extra exports from <code>sidebar-core.mjs</code>.</p>
+
+<h2>10. Traps</h2>
+<ul>
+  <li><b>Window names are format-expanded.</b> <code>#(cmd)</code> in a name runs a shell command. Escape <code>#</code> as <code>##</code>; skip <code>-c</code> for a directory containing <code>#</code>.</li>
+  <li><b>A trailing <code>;</code> ends a tmux command</b>. Trim it from option values and titles. For the command line typed with <code>send-keys -l</code>, where it is part of the command (<code>find … ;</code>), rewrite a final <code>;</code> as <code>\;</code>, which tmux turns back into <code>;</code> (tmux 3.8).</li>
+  <li><b><code>-f</code> is read once.</b> A re-source replaces global hooks instead of duplicating them.</li>
+  <li><b>zsh expands an unquoted <code>=band</code></b> to the path of a command named <code>band</code>. Quote the attach target.</li>
+  <li><b>Server environment.</b> Whatever environment starts the tmux server is inherited by every pane, and without <code>LANG</code> tmux draws ● ✓ ◌ as <code>_</code>. Start it with <code>env -i</code> plus <code>PATH HOME USER LOGNAME SHELL TMPDIR SSH_AUTH_SOCK DISPLAY WAYLAND_DISPLAY XDG_RUNTIME_DIR DBUS_SESSION_BUS_ADDRESS</code> from the caller (each only when set; the last four are a Linux desktop session's, for browser logins, the clipboard and the keyring), <code>LANG</code> (caller's, else <code>en_US.UTF-8</code>), <code>TERM=xterm-256color</code>, <code>COLORTERM=truecolor</code>.</li>
+  <li><b><code>kill-server</code> leaves the socket file.</b> Test for a server with <code>list-sessions</code>, never with the socket's existence.</li>
+  <li><b>No click target on pane borders.</b> tmux has clickable ranges on the status line only, which is why close lives in the sidebar.</li>
+  <li><b>A new window has no state</b> until its first hook fires, which is why ✕ confirms for an empty state.</li>
+</ul>
+
+<h2>11. Security note</h2>
+<p>Anything that can connect to the tmux socket can run commands in your panes, outside any sandbox the agent in that pane runs under; anything that can write <code>state/sessions/</code> picks which folders a restore resumes in. Keep <code>B</code> at mode 0700. If you run agents in a sandbox (Claude Code's <code>sandbox</code> setting, codex's seatbelt), deny <code>B</code> to them and check that a sandboxed command cannot connect to the socket: from inside a sandboxed agent, <code>tmux -S &lt;socket&gt; list-windows</code> must fail. Claude Code's sandbox denies unix socket connects unless <code>allowUnixSockets</code> is set; do not set it.</p>
+
+<h2>12. Acceptance checklist</h2>
+<ol>
+  <li><code>sidebar-core.mjs</code> reproduces every case in Appendix A, both the text and the raw escape strings.</li>
+  <li><code>band-new -- claude</code> with nothing running: one terminal window opens attached, sidebar on the left, Claude on the right.</li>
+  <li>A second <code>band-new</code> while attached: a new row appears; focus stays where it was.</li>
+  <li>Submit a prompt → row goes blue ◌ with <code>now</code>. Turn ends → green ✓. Focus it → grey ✓. Trigger a permission dialog → orange ● with <code>permission: Bash</code> in the table; approve → blue.</li>
+  <li>Ask the session to print a PR URL of an open PR: within one poll its badge shows the PR and CI mark.</li>
+  <li>Click rows to switch; the sidebar stays 30 columns after resizing the terminal and switching windows.</li>
+  <li>✕ on a done row closes it at once; on a working row asks yes/no first.</li>
+  <li>Click <code>+ new session</code>: a window named <code>terminal</code> opens and takes focus, with the sidebar on the left and a shell prompt in the clicked window's folder; every sidebar lists it. A double-click opens one. Start <code>claude</code> there: the row picks up its state.</li>
+  <li>⤢ opens the table sorted needs-input first; resizing the terminal keeps it open; any key or ⤡ collapses; clicking a row collapses and switches.</li>
+  <li><code>cd</code> into another repo or worktree inside a session: the repo line updates within 5 s.</li>
+  <li>Put another app in front, run <code>band-attach</code>: the existing iTerm window comes forward on the band tab; no second window opens.</li>
+  <li>Close the terminal window, run <code>band-attach</code>: one window opens attached, every session still there with its state.</li>
+  <li>Open three sessions, close one with ✕, then <code>tmux -S B/state/tmux.sock kill-server</code>. <code>band-attach</code> offers to reopen 2; both come back resumed in their folders with their titles and tags; the closed one does not.</li>
+  <li>Same after a reboot (within 24 h). Run <code>band-new</code> first, then <code>band-attach</code>: the 2 lost sessions are still offered.</li>
+  <li>Exit Claude and the shell in a window: the sidebar exits, the window closes, and the session is not offered for restore.</li>
+  <li>Titles containing <code>#(echo hi)</code> render literally.</li>
+</ol>
+
+<h2>Appendix A. Sidebar test vectors</h2>
+<p>Each case names its call: which function, which of the fixed rows (by index), width, height, confirm. The fixed rows (as <code>parseWindows</code> returns them), <code>now</code> and every case with its inputs (<code>view</code>, <code>rows</code>, <code>width</code>, <code>height</code>, <code>confirm</code>) are in the JSON block below (<code>&lt;script type="application/json" id="test-vectors"&gt;</code> in this page's source), with each case's expected output as plain text (<code>text</code>, escapes stripped) and as the exact string (<code>raw</code>, one entry per line). The text form, between <code>|</code> bars:</p>
+<h3>normal 30x24</h3>
+<p class="note"><code>render({ rows: rows[0, 1, 2, 3, 4, 5], width: 30, height: 24, confirm: null, now })</code></p>
+<div class="scroll"><pre>| band                       ⤢ |
+| 2 need input                 |
+|                              |
+| ● plan the importer        ✕ |
+|   needs input 31m work       |
+|   etl · main                 |
+|                              |
+| ● fix login redirect       ✕ |
+|   needs input 4m      #412 ✗ |
+|   web-app · fix-login        |
+|                              |
+| ◌ write migration test fo… ✕ |
+|   working 12m        #88+1 ◌ |
+|   api · main                 |
+|                              |
+| ✓ summarize PR feedback    ✕ |
+|   done 1h work   #318 merged |
+|   docs · review-fixes        |
+|                              |
+| ✓ 修复 bug 🐛 emoji        ✕ |
+|   2d                         |
+|   web · main                 |
+|                              |
+| + new session                |</pre></div>
+<h3>normal 30x24, close confirm on @3</h3>
+<p class="note"><code>render({ rows: rows[0, 1, 2, 3, 4, 5], width: 30, height: 24, confirm: "@3", now })</code></p>
+<div class="scroll"><pre>| band                       ⤢ |
+| 2 need input                 |
+|                              |
+| ● plan the importer        ✕ |
+|   needs input 31m work       |
+|   etl · main                 |
+|                              |
+| ● fix login redirect       ✕ |
+|   needs input 4m      #412 ✗ |
+|   web-app · fix-login        |
+|                              |
+| ◌ write migration test fo… ✕ |
+| Close?  yes   no             |
+|   api · main                 |
+|                              |
+| ✓ summarize PR feedback    ✕ |
+|   done 1h work   #318 merged |
+|   docs · review-fixes        |
+|                              |
+| ✓ 修复 bug 🐛 emoji        ✕ |
+|   2d                         |
+|   web · main                 |
+|                              |
+| + new session                |</pre></div>
+<h3>normal 30x12 (2 rows fit; scrolled so the active one shows)</h3>
+<p class="note"><code>render({ rows: rows[0, 1, 2, 3, 4, 5], width: 30, height: 12, confirm: null, now })</code></p>
+<div class="scroll"><pre>| band                       ⤢ |
+| 2 need input                 |
+|                              |
+| ● plan the importer        ✕ |
+|   needs input 31m work       |
+|   etl · main                 |
+|                              |
+| ● fix login redirect       ✕ |
+|   needs input 4m      #412 ✗ |
+|   web-app · fix-login        |
+|                              |
+| + new session                |</pre></div>
+<h3>normal 6x10 (narrow fallbacks), first row only</h3>
+<p class="note"><code>render({ rows: rows[0], width: 6, height: 10, confirm: null, now })</code></p>
+<div class="scroll"><pre>| band |
+| 1 ne…|
+|      |
+|      |
+|   ne…|
+|   et…|
+|      |
+| + ne…|</pre></div>
+<h3>table 150x12</h3>
+<p class="note"><code>renderTable({ rows: rows[0, 1, 2, 3, 4, 5], width: 150, height: 12, confirm: null, now })</code></p>
+<div class="scroll"><pre>| band   6 sessions, 2 need input                                                                                                           ⤡ collapse |
+|                                                                                                                                                      |
+| STATE              SESSION                      REPO · BRANCH                 PR · CI                     WAITING ON          MODEL · MODE           |
+| ● needs input 31m  plan the importer            etl · main                                                plan approval       opus · plan          ✕ |
+| ● needs input 4m   fix login redirect           web-app · fix-login           #412 failing                permission: Bash    sonnet · default     ✕ |
+| ◌ working 12m      write migration test for 00… api · main                    #88 running, #90 passing                                             ✕ |
+| ·                  no state yet                 scratch                       #7 closed                                                            ✕ |
+| ✓ done 1h          summarize PR feedback        docs · review-fixes           #318 merged                                                          ✕ |
+| ✓ 2d               修复 bug 🐛 emoji            web · main                                                                                         ✕ |</pre></div>
+<h3>table 100x12, close confirm on @4</h3>
+<p class="note"><code>renderTable({ rows: rows[0, 1, 2, 3, 4, 5], width: 100, height: 12, confirm: "@4", now })</code></p>
+<div class="scroll"><pre>| band   6 sessions, 2 need input                                                         ⤡ collapse |
+|                                                                                                    |
+| STATE              SESSION            REPO · BRANCH                 PR · CI                        |
+| ● needs input 31m  plan the importer  etl · main                                                 ✕ |
+| ● needs input 4m   fix login redirect web-app · fix-login           #412 failing                 ✕ |
+| ◌ working 12m      write migration t… api · main                    #88 running, #90 passing     ✕ |
+| ·                  no state yet       scratch                       #7 closed                    ✕ |
+| Close?  yes   no                                                                                   |
+| ✓ 2d               修复 bug 🐛 emoji  web · main                                                 ✕ |</pre></div>
+<h3>normal 30x12, active row last (list scrolls)</h3>
+<p class="note"><code>render({ rows: rows[0, 2, 3, 4, 6], width: 30, height: 12, confirm: null, now })</code></p>
+<div class="scroll"><pre>| band                       ⤢ |
+| 1 needs input                |
+|                              |
+| ✓ 修复 bug 🐛 emoji        ✕ |
+|   2d                         |
+|   web · main                 |
+|                              |
+| ✓ retry flaky test         ✕ |
+|   done now          #502+1 ✓ |
+|   api · fix-ci               |
+|                              |
+| + new session                |</pre></div>
+<h3>normal 30x16, nothing waiting</h3>
+<p class="note"><code>render({ rows: rows[2, 3, 6], width: 30, height: 16, confirm: null, now })</code></p>
+<div class="scroll"><pre>| band                       ⤢ |
+| nothing waiting              |
+|                              |
+| ◌ write migration test fo… ✕ |
+|   working 12m        #88+1 ◌ |
+|   api · main                 |
+|                              |
+| ✓ summarize PR feedback    ✕ |
+|   done 1h work   #318 merged |
+|   docs · review-fixes        |
+|                              |
+| ✓ retry flaky test         ✕ |
+|   done now          #502+1 ✓ |
+|   api · fix-ci               |
+|                              |
+| + new session                |</pre></div>
+<h3>normal 20x8 (badge shown: 20 − 6 − 2 = 12)</h3>
+<p class="note"><code>render({ rows: rows[1], width: 20, height: 8, confirm: null, now })</code></p>
+<div class="scroll"><pre>| band             ⤢ |
+| 1 needs input      |
+|                    |
+| ● fix login red… ✕ |
+|   needs in… #412 ✗ |
+|   web-app · fix-lo…|
+|                    |
+| + new session      |</pre></div>
+<h3>normal 19x8 (badge dropped: 19 − 6 − 2 = 11)</h3>
+<p class="note"><code>render({ rows: rows[1], width: 19, height: 8, confirm: null, now })</code></p>
+<div class="scroll"><pre>| band            ⤢ |
+| 1 needs input     |
+|                   |
+| ● fix login re… ✕ |
+|   needs input 4m  |
+|   web-app · fix-l…|
+|                   |
+| + new session     |</pre></div>
+<h3>normal 30x6, no sessions (new-session line only)</h3>
+<p class="note"><code>render({ rows: rows[], width: 30, height: 6, confirm: null, now })</code></p>
+<div class="scroll"><pre>| band                       ⤢ |
+| nothing waiting              |
+|                              |
+| + new session                |</pre></div>
+<h3>normal 30x13 (one row fewer: 2 lines kept for new session)</h3>
+<p class="note"><code>render({ rows: rows[0, 2, 3], width: 30, height: 13, confirm: null, now })</code></p>
+<div class="scroll"><pre>| band                       ⤢ |
+| 1 needs input                |
+|                              |
+| ● plan the importer        ✕ |
+|   needs input 31m work       |
+|   etl · main                 |
+|                              |
+| ◌ write migration test fo… ✕ |
+|   working 12m        #88+1 ◌ |
+|   api · main                 |
+|                              |
+| + new session                |</pre></div>
+<h3>normal 8x2 (header with ⤢)</h3>
+<p class="note"><code>render({ rows: rows[6], width: 8, height: 2, confirm: null, now })</code></p>
+<div class="scroll"><pre>| band ⤢ |
+| nothin…|</pre></div>
+<h3>normal 7x2 (header without ⤢)</h3>
+<p class="note"><code>render({ rows: rows[6], width: 7, height: 2, confirm: null, now })</code></p>
+<div class="scroll"><pre>| band  |
+| nothi…|</pre></div>
+<h3>table 120x6, one session</h3>
+<p class="note"><code>renderTable({ rows: rows[6], width: 120, height: 6, confirm: null, now })</code></p>
+<div class="scroll"><pre>| band   1 session, 0 need input                                                                              ⤡ collapse |
+|                                                                                                                        |
+| STATE              SESSION            REPO · BRANCH                 PR · CI                     WAITING ON             |
+| ✓ done now         retry flaky test   api · fix-ci                  #501 open, #502 passing                          ✕ |</pre></div>
+<h3>table 120x6, active row confirming</h3>
+<p class="note"><code>renderTable({ rows: rows[3, 6], width: 120, height: 6, confirm: "@7", now })</code></p>
+<div class="scroll"><pre>| band   2 sessions, 0 need input                                                                             ⤡ collapse |
+|                                                                                                                        |
+| STATE              SESSION            REPO · BRANCH                 PR · CI                     WAITING ON             |
+| ✓ done 1h          summarize PR feed… docs · review-fixes           #318 merged                                      ✕ |
+| Close?  yes   no                                                                                                       |</pre></div>
+<h3>table 18x1 (title with ⤡ collapse)</h3>
+<p class="note"><code>renderTable({ rows: rows[6], width: 18, height: 1, confirm: null, now })</code></p>
+<div class="scroll"><pre>| band …⤡ collapse |</pre></div>
+<h3>table 17x1 (title without ⤡ collapse)</h3>
+<p class="note"><code>renderTable({ rows: rows[6], width: 17, height: 1, confirm: null, now })</code></p>
+<div class="scroll"><pre>| band   1 sessio…|</pre></div>
+<h3>table 60x8</h3>
+<p class="note"><code>renderTable({ rows: rows[0, 1, 2, 3, 4, 5], width: 60, height: 8, confirm: null, now })</code></p>
+<div class="scroll"><pre>| band   6 sessions, 2 need input                 ⤡ collapse |
+|                                                            |
+| STATE              SESSION                                 |
+| ● needs input 31m  plan the importer                     ✕ |
+| ● needs input 4m   fix login redirect                    ✕ |
+| ◌ working 12m      write migration test for 0042 rollb…  ✕ |
+| ·                  no state yet                          ✕ |
+| ✓ done 1h          summarize PR feedback                 ✕ |</pre></div>
+<script type="application/json" id="test-vectors">{"now":1763300000,"rows":[{"id":"@1","active":false,"state":"input","tag":"work","since":1763298140,"wait":"plan approval","model":"opus · plan","repo":"etl · main","pr":"","name":"plan the importer"},{"id":"@2","active":true,"state":"input","tag":"","since":1763299760,"wait":"permission: Bash","model":"sonnet · default","repo":"web-app · fix-login","pr":"412:o:f","name":"fix login redirect"},{"id":"@3","active":false,"state":"working","tag":"","since":1763299280,"wait":"","model":"","repo":"api · main","pr":"88:o:r,90:o:p","name":"write migration test for 0042 rollback"},{"id":"@4","active":false,"state":"done","tag":"work","since":1763296400,"wait":"","model":"","repo":"docs · review-fixes","pr":"318:m:p","name":"summarize PR feedback"},{"id":"@5","active":false,"state":"seen","tag":"","since":1763127200,"wait":"","model":"","repo":"web · main","pr":"","name":"修复 bug 🐛 emoji"},{"id":"@6","active":false,"state":"","tag":"","since":0,"wait":"","model":"","repo":"scratch","pr":"7:c:","name":"no state yet"},{"id":"@7","active":true,"state":"done","tag":"","since":1763299955,"wait":"","model":"","repo":"api · fix-ci","pr":"501:o:,502:o:p","name":"retry flaky test"}],"cases":[{"name":"normal 30x24","view":"normal","width":30,"height":24,"confirm":null,"rows":[0,1,2,3,4,5],"text":[" band                       ⤢ "," 2 need input                 ","                              "," ● plan the importer        ✕ ","   needs input 31m work       ","   etl · main                 ","                              "," ● fix login redirect       ✕ ","   needs input 4m      #412 ✗ ","   web-app · fix-login        ","                              "," ◌ write migration test fo… ✕ ","   working 12m        #88+1 ◌ ","   api · main                 ","                              "," ✓ summarize PR feedback    ✕ ","   done 1h work   #318 merged ","   docs · review-fixes        ","                              "," ✓ 修复 bug 🐛 emoji        ✕ ","   2d                         ","   web · main                 ","                              "," + new session                "],"raw":["\u001b[1m band                       \u001b[22m\u001b[38;5;244m⤢ \u001b[39m","\u001b[38;5;244m 2 need input                 \u001b[39m","                              "," \u001b[38;5;214m●\u001b[39m plan the importer       \u001b[38;5;244m ✕ \u001b[39m\u001b[0m","\u001b[38;5;214m   needs input 31m\u001b[39m\u001b[38;5;244m work       \u001b[39m\u001b[0m","\u001b[38;5;244m   etl · main                 \u001b[39m\u001b[0m","                              ","\u001b[48;5;237m \u001b[38;5;214m●\u001b[39m \u001b[1mfix login redirect      \u001b[22m\u001b[38;5;244m ✕ \u001b[39m\u001b[0m","\u001b[48;5;237m\u001b[38;5;214m   needs input 4m\u001b[39m\u001b[38;5;244m     \u001b[39m\u001b[38;5;203m #412 ✗ \u001b[39m\u001b[0m","\u001b[48;5;237m\u001b[38;5;244m   web-app · fix-login        \u001b[39m\u001b[0m","                              "," \u001b[38;5;75m◌\u001b[39m write migration test fo…\u001b[38;5;244m ✕ \u001b[39m\u001b[0m","\u001b[38;5;75m   working 12m\u001b[39m\u001b[38;5;244m       \u001b[39m\u001b[38;5;75m #88+1 ◌ \u001b[39m\u001b[0m","\u001b[38;5;244m   api · main                 \u001b[39m\u001b[0m","                              "," \u001b[38;5;71m✓\u001b[39m summarize PR feedback   \u001b[38;5;244m ✕ \u001b[39m\u001b[0m","\u001b[38;5;71m   done 1h\u001b[39m\u001b[38;5;244m work  \u001b[39m\u001b[38;5;141m #318 merged \u001b[39m\u001b[0m","\u001b[38;5;244m   docs · review-fixes        \u001b[39m\u001b[0m","                              "," \u001b[38;5;244m✓\u001b[39m 修复 bug 🐛 emoji       \u001b[38;5;244m ✕ \u001b[39m\u001b[0m","\u001b[38;5;244m   2d\u001b[39m\u001b[38;5;244m                         \u001b[39m\u001b[0m","\u001b[38;5;244m   web · main                 \u001b[39m\u001b[0m","                              ","\u001b[38;5;244m + new session                \u001b[39m"]},{"name":"normal 30x24, close confirm on @3","view":"normal","width":30,"height":24,"confirm":"@3","rows":[0,1,2,3,4,5],"text":[" band                       ⤢ "," 2 need input                 ","                              "," ● plan the importer        ✕ ","   needs input 31m work       ","   etl · main                 ","                              "," ● fix login redirect       ✕ ","   needs input 4m      #412 ✗ ","   web-app · fix-login        ","                              "," ◌ write migration test fo… ✕ "," Close?  yes   no             ","   api · main                 ","                              "," ✓ summarize PR feedback    ✕ ","   done 1h work   #318 merged ","   docs · review-fixes        ","                              "," ✓ 修复 bug 🐛 emoji        ✕ ","   2d                         ","   web · main                 ","                              "," + new session                "],"raw":["\u001b[1m band                       \u001b[22m\u001b[38;5;244m⤢ \u001b[39m","\u001b[38;5;244m 2 need input                 \u001b[39m","                              "," \u001b[38;5;214m●\u001b[39m plan the importer       \u001b[38;5;244m ✕ \u001b[39m\u001b[0m","\u001b[38;5;214m   needs input 31m\u001b[39m\u001b[38;5;244m work       \u001b[39m\u001b[0m","\u001b[38;5;244m   etl · main                 \u001b[39m\u001b[0m","                              ","\u001b[48;5;237m \u001b[38;5;214m●\u001b[39m \u001b[1mfix login redirect      \u001b[22m\u001b[38;5;244m ✕ \u001b[39m\u001b[0m","\u001b[48;5;237m\u001b[38;5;214m   needs input 4m\u001b[39m\u001b[38;5;244m     \u001b[39m\u001b[38;5;203m #412 ✗ \u001b[39m\u001b[0m","\u001b[48;5;237m\u001b[38;5;244m   web-app · fix-login        \u001b[39m\u001b[0m","                              "," \u001b[38;5;75m◌\u001b[39m write migration test fo…\u001b[38;5;244m ✕ \u001b[39m\u001b[0m"," Close?  yes   no             \u001b[0m","\u001b[38;5;244m   api · main                 \u001b[39m\u001b[0m","                              "," \u001b[38;5;71m✓\u001b[39m summarize PR feedback   \u001b[38;5;244m ✕ \u001b[39m\u001b[0m","\u001b[38;5;71m   done 1h\u001b[39m\u001b[38;5;244m work  \u001b[39m\u001b[38;5;141m #318 merged \u001b[39m\u001b[0m","\u001b[38;5;244m   docs · review-fixes        \u001b[39m\u001b[0m","                              "," \u001b[38;5;244m✓\u001b[39m 修复 bug 🐛 emoji       \u001b[38;5;244m ✕ \u001b[39m\u001b[0m","\u001b[38;5;244m   2d\u001b[39m\u001b[38;5;244m                         \u001b[39m\u001b[0m","\u001b[38;5;244m   web · main                 \u001b[39m\u001b[0m","                              ","\u001b[38;5;244m + new session                \u001b[39m"]},{"name":"normal 30x12 (2 rows fit; scrolled so the active one shows)","view":"normal","width":30,"height":12,"confirm":null,"rows":[0,1,2,3,4,5],"text":[" band                       ⤢ "," 2 need input                 ","                              "," ● plan the importer        ✕ ","   needs input 31m work       ","   etl · main                 ","                              "," ● fix login redirect       ✕ ","   needs input 4m      #412 ✗ ","   web-app · fix-login        ","                              "," + new session                "],"raw":["\u001b[1m band                       \u001b[22m\u001b[38;5;244m⤢ \u001b[39m","\u001b[38;5;244m 2 need input                 \u001b[39m","                              "," \u001b[38;5;214m●\u001b[39m plan the importer       \u001b[38;5;244m ✕ \u001b[39m\u001b[0m","\u001b[38;5;214m   needs input 31m\u001b[39m\u001b[38;5;244m work       \u001b[39m\u001b[0m","\u001b[38;5;244m   etl · main                 \u001b[39m\u001b[0m","                              ","\u001b[48;5;237m \u001b[38;5;214m●\u001b[39m \u001b[1mfix login redirect      \u001b[22m\u001b[38;5;244m ✕ \u001b[39m\u001b[0m","\u001b[48;5;237m\u001b[38;5;214m   needs input 4m\u001b[39m\u001b[38;5;244m     \u001b[39m\u001b[38;5;203m #412 ✗ \u001b[39m\u001b[0m","\u001b[48;5;237m\u001b[38;5;244m   web-app · fix-login        \u001b[39m\u001b[0m","                              ","\u001b[38;5;244m + new session                \u001b[39m"]},{"name":"normal 6x10 (narrow fallbacks), first row only","view":"normal","width":6,"height":10,"confirm":null,"rows":[0],"text":[" band "," 1 ne…","      ","      ","   ne…","   et…","      "," + ne…"],"raw":["\u001b[1m band \u001b[22m","\u001b[38;5;244m 1 ne…\u001b[39m","      ","      \u001b[0m","\u001b[38;5;214m   ne…\u001b[39m\u001b[38;5;244m\u001b[39m\u001b[0m","\u001b[38;5;244m   et…\u001b[39m\u001b[0m","      ","\u001b[38;5;244m + ne…\u001b[39m"]},{"name":"table 150x12","view":"table","width":150,"height":12,"confirm":null,"rows":[0,1,2,3,4,5],"text":[" band   6 sessions, 2 need input                                                                                                           ⤡ collapse ","                                                                                                                                                      "," STATE              SESSION                      REPO · BRANCH                 PR · CI                     WAITING ON          MODEL · MODE           "," ● needs input 31m  plan the importer            etl · main                                                plan approval       opus · plan          ✕ "," ● needs input 4m   fix login redirect           web-app · fix-login           #412 failing                permission: Bash    sonnet · default     ✕ "," ◌ working 12m      write migration test for 00… api · main                    #88 running, #90 passing                                             ✕ "," ·                  no state yet                 scratch                       #7 closed                                                            ✕ "," ✓ done 1h          summarize PR feedback        docs · review-fixes           #318 merged                                                          ✕ "," ✓ 2d               修复 bug 🐛 emoji            web · main                                                                                         ✕ "],"raw":["\u001b[1m band   6 sessions, 2 need input                                                                                                           \u001b[22m\u001b[38;5;244m⤡ collapse \u001b[39m","                                                                                                                                                      ","\u001b[38;5;244m STATE              SESSION                      REPO · BRANCH                 PR · CI                     WAITING ON          MODEL · MODE           \u001b[39m"," \u001b[38;5;214m● needs input 31m  \u001b[39mplan the importer            etl · main                    \u001b[38;5;244m                            \u001b[39m\u001b[38;5;214mplan approval       \u001b[39m\u001b[38;5;244mopus · plan         \u001b[39m\u001b[38;5;244m ✕ \u001b[39m\u001b[0m","\u001b[48;5;237m \u001b[38;5;214m● needs input 4m   \u001b[39m\u001b[1mfix login redirect          \u001b[22m web-app · fix-login           \u001b[38;5;203m#412 failing                \u001b[39m\u001b[38;5;214mpermission: Bash    \u001b[39m\u001b[38;5;244msonnet · default    \u001b[39m\u001b[38;5;244m ✕ \u001b[39m\u001b[0m"," \u001b[38;5;75m◌ working 12m      \u001b[39mwrite migration test for 00… api · main                    \u001b[38;5;75m#88 running, #90 passing    \u001b[39m\u001b[38;5;75m                    \u001b[39m\u001b[38;5;244m                    \u001b[39m\u001b[38;5;244m ✕ \u001b[39m\u001b[0m"," \u001b[38;5;244m·                  \u001b[39mno state yet                 scratch                       \u001b[38;5;244m#7 closed                   \u001b[39m\u001b[38;5;244m                    \u001b[39m\u001b[38;5;244m                    \u001b[39m\u001b[38;5;244m ✕ \u001b[39m\u001b[0m"," \u001b[38;5;71m✓ done 1h          \u001b[39msummarize PR feedback        docs · review-fixes           \u001b[38;5;141m#318 merged                 \u001b[39m\u001b[38;5;71m                    \u001b[39m\u001b[38;5;244m                    \u001b[39m\u001b[38;5;244m ✕ \u001b[39m\u001b[0m"," \u001b[38;5;244m✓ 2d               \u001b[39m修复 bug 🐛 emoji            web · main                    \u001b[38;5;244m                            \u001b[39m\u001b[38;5;244m                    \u001b[39m\u001b[38;5;244m                    \u001b[39m\u001b[38;5;244m ✕ \u001b[39m\u001b[0m"]},{"name":"table 100x12, close confirm on @4","view":"table","width":100,"height":12,"confirm":"@4","rows":[0,1,2,3,4,5],"text":[" band   6 sessions, 2 need input                                                         ⤡ collapse ","                                                                                                    "," STATE              SESSION            REPO · BRANCH                 PR · CI                        "," ● needs input 31m  plan the importer  etl · main                                                 ✕ "," ● needs input 4m   fix login redirect web-app · fix-login           #412 failing                 ✕ "," ◌ working 12m      write migration t… api · main                    #88 running, #90 passing     ✕ "," ·                  no state yet       scratch                       #7 closed                    ✕ "," Close?  yes   no                                                                                   "," ✓ 2d               修复 bug 🐛 emoji  web · main                                                 ✕ "],"raw":["\u001b[1m band   6 sessions, 2 need input                                                         \u001b[22m\u001b[38;5;244m⤡ collapse \u001b[39m","                                                                                                    ","\u001b[38;5;244m STATE              SESSION            REPO · BRANCH                 PR · CI                        \u001b[39m"," \u001b[38;5;214m● needs input 31m  \u001b[39mplan the importer  etl · main                    \u001b[38;5;244m                            \u001b[39m\u001b[38;5;244m ✕ \u001b[39m\u001b[0m","\u001b[48;5;237m \u001b[38;5;214m● needs input 4m   \u001b[39m\u001b[1mfix login redirect\u001b[22m web-app · fix-login           \u001b[38;5;203m#412 failing                \u001b[39m\u001b[38;5;244m ✕ \u001b[39m\u001b[0m"," \u001b[38;5;75m◌ working 12m      \u001b[39mwrite migration t… api · main                    \u001b[38;5;75m#88 running, #90 passing    \u001b[39m\u001b[38;5;244m ✕ \u001b[39m\u001b[0m"," \u001b[38;5;244m·                  \u001b[39mno state yet       scratch                       \u001b[38;5;244m#7 closed                   \u001b[39m\u001b[38;5;244m ✕ \u001b[39m\u001b[0m"," Close?  yes   no                                                                                   \u001b[0m"," \u001b[38;5;244m✓ 2d               \u001b[39m修复 bug 🐛 emoji  web · main                    \u001b[38;5;244m                            \u001b[39m\u001b[38;5;244m ✕ \u001b[39m\u001b[0m"]},{"name":"normal 30x12, active row last (list scrolls)","view":"normal","width":30,"height":12,"confirm":null,"rows":[0,2,3,4,6],"text":[" band                       ⤢ "," 1 needs input                ","                              "," ✓ 修复 bug 🐛 emoji        ✕ ","   2d                         ","   web · main                 ","                              "," ✓ retry flaky test         ✕ ","   done now          #502+1 ✓ ","   api · fix-ci               ","                              "," + new session                "],"raw":["\u001b[1m band                       \u001b[22m\u001b[38;5;244m⤢ \u001b[39m","\u001b[38;5;244m 1 needs input                \u001b[39m","                              "," \u001b[38;5;244m✓\u001b[39m 修复 bug 🐛 emoji       \u001b[38;5;244m ✕ \u001b[39m\u001b[0m","\u001b[38;5;244m   2d\u001b[39m\u001b[38;5;244m                         \u001b[39m\u001b[0m","\u001b[38;5;244m   web · main                 \u001b[39m\u001b[0m","                              ","\u001b[48;5;237m \u001b[38;5;71m✓\u001b[39m \u001b[1mretry flaky test        \u001b[22m\u001b[38;5;244m ✕ \u001b[39m\u001b[0m","\u001b[48;5;237m\u001b[38;5;71m   done now\u001b[39m\u001b[38;5;244m         \u001b[39m\u001b[38;5;71m #502+1 ✓ \u001b[39m\u001b[0m","\u001b[48;5;237m\u001b[38;5;244m   api · fix-ci               \u001b[39m\u001b[0m","                              ","\u001b[38;5;244m + new session                \u001b[39m"]},{"name":"normal 30x16, nothing waiting","view":"normal","width":30,"height":16,"confirm":null,"rows":[2,3,6],"text":[" band                       ⤢ "," nothing waiting              ","                              "," ◌ write migration test fo… ✕ ","   working 12m        #88+1 ◌ ","   api · main                 ","                              "," ✓ summarize PR feedback    ✕ ","   done 1h work   #318 merged ","   docs · review-fixes        ","                              "," ✓ retry flaky test         ✕ ","   done now          #502+1 ✓ ","   api · fix-ci               ","                              "," + new session                "],"raw":["\u001b[1m band                       \u001b[22m\u001b[38;5;244m⤢ \u001b[39m","\u001b[38;5;244m nothing waiting              \u001b[39m","                              "," \u001b[38;5;75m◌\u001b[39m write migration test fo…\u001b[38;5;244m ✕ \u001b[39m\u001b[0m","\u001b[38;5;75m   working 12m\u001b[39m\u001b[38;5;244m       \u001b[39m\u001b[38;5;75m #88+1 ◌ \u001b[39m\u001b[0m","\u001b[38;5;244m   api · main                 \u001b[39m\u001b[0m","                              "," \u001b[38;5;71m✓\u001b[39m summarize PR feedback   \u001b[38;5;244m ✕ \u001b[39m\u001b[0m","\u001b[38;5;71m   done 1h\u001b[39m\u001b[38;5;244m work  \u001b[39m\u001b[38;5;141m #318 merged \u001b[39m\u001b[0m","\u001b[38;5;244m   docs · review-fixes        \u001b[39m\u001b[0m","                              ","\u001b[48;5;237m \u001b[38;5;71m✓\u001b[39m \u001b[1mretry flaky test        \u001b[22m\u001b[38;5;244m ✕ \u001b[39m\u001b[0m","\u001b[48;5;237m\u001b[38;5;71m   done now\u001b[39m\u001b[38;5;244m         \u001b[39m\u001b[38;5;71m #502+1 ✓ \u001b[39m\u001b[0m","\u001b[48;5;237m\u001b[38;5;244m   api · fix-ci               \u001b[39m\u001b[0m","                              ","\u001b[38;5;244m + new session                \u001b[39m"]},{"name":"normal 20x8 (badge shown: 20 − 6 − 2 = 12)","view":"normal","width":20,"height":8,"confirm":null,"rows":[1],"text":[" band             ⤢ "," 1 needs input      ","                    "," ● fix login red… ✕ ","   needs in… #412 ✗ ","   web-app · fix-lo…","                    "," + new session      "],"raw":["\u001b[1m band             \u001b[22m\u001b[38;5;244m⤢ \u001b[39m","\u001b[38;5;244m 1 needs input      \u001b[39m","                    ","\u001b[48;5;237m \u001b[38;5;214m●\u001b[39m \u001b[1mfix login red…\u001b[22m\u001b[38;5;244m ✕ \u001b[39m\u001b[0m","\u001b[48;5;237m\u001b[38;5;214m   needs in…\u001b[39m\u001b[38;5;244m\u001b[39m\u001b[38;5;203m #412 ✗ \u001b[39m\u001b[0m","\u001b[48;5;237m\u001b[38;5;244m   web-app · fix-lo…\u001b[39m\u001b[0m","                    ","\u001b[38;5;244m + new session      \u001b[39m"]},{"name":"normal 19x8 (badge dropped: 19 − 6 − 2 = 11)","view":"normal","width":19,"height":8,"confirm":null,"rows":[1],"text":[" band            ⤢ "," 1 needs input     ","                   "," ● fix login re… ✕ ","   needs input 4m  ","   web-app · fix-l…","                   "," + new session     "],"raw":["\u001b[1m band            \u001b[22m\u001b[38;5;244m⤢ \u001b[39m","\u001b[38;5;244m 1 needs input     \u001b[39m","                   ","\u001b[48;5;237m \u001b[38;5;214m●\u001b[39m \u001b[1mfix login re…\u001b[22m\u001b[38;5;244m ✕ \u001b[39m\u001b[0m","\u001b[48;5;237m\u001b[38;5;214m   needs input 4m\u001b[39m\u001b[38;5;244m  \u001b[39m\u001b[0m","\u001b[48;5;237m\u001b[38;5;244m   web-app · fix-l…\u001b[39m\u001b[0m","                   ","\u001b[38;5;244m + new session     \u001b[39m"]},{"name":"normal 30x6, no sessions (new-session line only)","view":"normal","width":30,"height":6,"confirm":null,"rows":[],"text":[" band                       ⤢ "," nothing waiting              ","                              "," + new session                "],"raw":["\u001b[1m band                       \u001b[22m\u001b[38;5;244m⤢ \u001b[39m","\u001b[38;5;244m nothing waiting              \u001b[39m","                              ","\u001b[38;5;244m + new session                \u001b[39m"]},{"name":"normal 30x13 (one row fewer: 2 lines kept for new session)","view":"normal","width":30,"height":13,"confirm":null,"rows":[0,2,3],"text":[" band                       ⤢ "," 1 needs input                ","                              "," ● plan the importer        ✕ ","   needs input 31m work       ","   etl · main                 ","                              "," ◌ write migration test fo… ✕ ","   working 12m        #88+1 ◌ ","   api · main                 ","                              "," + new session                "],"raw":["\u001b[1m band                       \u001b[22m\u001b[38;5;244m⤢ \u001b[39m","\u001b[38;5;244m 1 needs input                \u001b[39m","                              "," \u001b[38;5;214m●\u001b[39m plan the importer       \u001b[38;5;244m ✕ \u001b[39m\u001b[0m","\u001b[38;5;214m   needs input 31m\u001b[39m\u001b[38;5;244m work       \u001b[39m\u001b[0m","\u001b[38;5;244m   etl · main                 \u001b[39m\u001b[0m","                              "," \u001b[38;5;75m◌\u001b[39m write migration test fo…\u001b[38;5;244m ✕ \u001b[39m\u001b[0m","\u001b[38;5;75m   working 12m\u001b[39m\u001b[38;5;244m       \u001b[39m\u001b[38;5;75m #88+1 ◌ \u001b[39m\u001b[0m","\u001b[38;5;244m   api · main                 \u001b[39m\u001b[0m","                              ","\u001b[38;5;244m + new session                \u001b[39m"]},{"name":"normal 8x2 (header with ⤢)","view":"normal","width":8,"height":2,"confirm":null,"rows":[6],"text":[" band ⤢ "," nothin…"],"raw":["\u001b[1m band \u001b[22m\u001b[38;5;244m⤢ \u001b[39m","\u001b[38;5;244m nothin…\u001b[39m"]},{"name":"normal 7x2 (header without ⤢)","view":"normal","width":7,"height":2,"confirm":null,"rows":[6],"text":[" band  "," nothi…"],"raw":["\u001b[1m band  \u001b[22m","\u001b[38;5;244m nothi…\u001b[39m"]},{"name":"table 120x6, one session","view":"table","width":120,"height":6,"confirm":null,"rows":[6],"text":[" band   1 session, 0 need input                                                                              ⤡ collapse ","                                                                                                                        "," STATE              SESSION            REPO · BRANCH                 PR · CI                     WAITING ON             "," ✓ done now         retry flaky test   api · fix-ci                  #501 open, #502 passing                          ✕ "],"raw":["\u001b[1m band   1 session, 0 need input                                                                              \u001b[22m\u001b[38;5;244m⤡ collapse \u001b[39m","                                                                                                                        ","\u001b[38;5;244m STATE              SESSION            REPO · BRANCH                 PR · CI                     WAITING ON             \u001b[39m","\u001b[48;5;237m \u001b[38;5;71m✓ done now         \u001b[39m\u001b[1mretry flaky test  \u001b[22m api · fix-ci                  \u001b[38;5;71m#501 open, #502 passing     \u001b[39m\u001b[38;5;71m                    \u001b[39m\u001b[38;5;244m ✕ \u001b[39m\u001b[0m"]},{"name":"table 120x6, active row confirming","view":"table","width":120,"height":6,"confirm":"@7","rows":[3,6],"text":[" band   2 sessions, 0 need input                                                                             ⤡ collapse ","                                                                                                                        "," STATE              SESSION            REPO · BRANCH                 PR · CI                     WAITING ON             "," ✓ done 1h          summarize PR feed… docs · review-fixes           #318 merged                                      ✕ "," Close?  yes   no                                                                                                       "],"raw":["\u001b[1m band   2 sessions, 0 need input                                                                             \u001b[22m\u001b[38;5;244m⤡ collapse \u001b[39m","                                                                                                                        ","\u001b[38;5;244m STATE              SESSION            REPO · BRANCH                 PR · CI                     WAITING ON             \u001b[39m"," \u001b[38;5;71m✓ done 1h          \u001b[39msummarize PR feed… docs · review-fixes           \u001b[38;5;141m#318 merged                 \u001b[39m\u001b[38;5;71m                    \u001b[39m\u001b[38;5;244m ✕ \u001b[39m\u001b[0m","\u001b[48;5;237m Close?  yes   no                                                                                                       \u001b[0m"]},{"name":"table 18x1 (title with ⤡ collapse)","view":"table","width":18,"height":1,"confirm":null,"rows":[6],"text":[" band …⤡ collapse "],"raw":["\u001b[1m band …\u001b[22m\u001b[38;5;244m⤡ collapse \u001b[39m"]},{"name":"table 17x1 (title without ⤡ collapse)","view":"table","width":17,"height":1,"confirm":null,"rows":[6],"text":[" band   1 sessio…"],"raw":["\u001b[1m band   1 sessio…\u001b[22m"]},{"name":"table 60x8","view":"table","width":60,"height":8,"confirm":null,"rows":[0,1,2,3,4,5],"text":[" band   6 sessions, 2 need input                 ⤡ collapse ","                                                            "," STATE              SESSION                                 "," ● needs input 31m  plan the importer                     ✕ "," ● needs input 4m   fix login redirect                    ✕ "," ◌ working 12m      write migration test for 0042 rollb…  ✕ "," ·                  no state yet                          ✕ "," ✓ done 1h          summarize PR feedback                 ✕ "],"raw":["\u001b[1m band   6 sessions, 2 need input                 \u001b[22m\u001b[38;5;244m⤡ collapse \u001b[39m","                                                            ","\u001b[38;5;244m STATE              SESSION                                 \u001b[39m"," \u001b[38;5;214m● needs input 31m  \u001b[39mplan the importer                    \u001b[38;5;244m ✕ \u001b[39m\u001b[0m","\u001b[48;5;237m \u001b[38;5;214m● needs input 4m   \u001b[39m\u001b[1mfix login redirect                  \u001b[22m \u001b[38;5;244m ✕ \u001b[39m\u001b[0m"," \u001b[38;5;75m◌ working 12m      \u001b[39mwrite migration test for 0042 rollb… \u001b[38;5;244m ✕ \u001b[39m\u001b[0m"," \u001b[38;5;244m·                  \u001b[39mno state yet                         \u001b[38;5;244m ✕ \u001b[39m\u001b[0m"," \u001b[38;5;71m✓ done 1h          \u001b[39msummarize PR feedback                \u001b[38;5;244m ✕ \u001b[39m\u001b[0m"]}]}</script>
+</main>
+
+<script>
+(() => {
+  const W = 30, RW = 54, H = 17, TW = W + 1 + RW;
+  const C = { w: '#d0d0d0', hi: '#ffffff', d: '#808080', o: '#ffaf00', g: '#5faf5f', b: '#5fafff', r: '#ff5f5f', m: '#af87ff', line: '#444444', act: '#3a3a3a' };
+  const LOOK = { input: ['●', C.o, 'needs input'], working: ['◌', C.b, 'working'], done: ['✓', C.g, 'done'], seen: ['✓', C.d, ''], '': ['·', C.d, ''] };
+  const RANK = { input: 0, working: 1, '': 1, done: 2, seen: 3 };
+  const PANES = {
+    aWorking: [['> fix the login redirect after SSO'], [''], ['● Read src/auth/callback.ts'], ['● Update src/auth/callback.ts'], ['  ⎿ +12 -4', C.d], [''], ['✻ Working… (esc to interrupt)', C.o]],
+    aDone: [['> fix the login redirect after SSO'], [''], ['● Update src/auth/callback.ts'], ['  ⎿ +12 -4', C.d], ['● Bash(gh pr create)'], ['  ⎿ https://github.com/acme/web-app/pull/412', C.d], [''], ['● Opened #412. The callback keeps the return URL.'], [''], ['> ', C.hi]],
+    bInput: [['> add a test for migration 0042'], [''], ['● Bash(npm test -- migrations)'], [''], [' Do you want to proceed?', C.hi], [' ❯ 1. Yes', C.b], ['   2. No']],
+    bWorking: [['> add a test for migration 0042'], [''], ['● Bash(npm test -- migrations)'], ['  ⎿ 14 passed', C.d], [''], ['✻ Working… (esc to interrupt)', C.o]],
+    shell: [['~/code/web-app $ ', C.hi]],
+    c: [['> summarize the review comments on #318'], [''], ['● 3 threads need a code change, 2 are questions.'], [''], ['> ', C.hi]],
+  };
+  const pre = document.getElementById('demo-screen');
+  const ptr = document.getElementById('demo-ptr');
+  const cap = document.getElementById('demo-cap');
+  const btn = document.getElementById('demo-btn');
+  let rows = [], active = 1, zoom = false, confirm = null, timers = [];
+
+  const fit = (s, w) => (s.length <= w ? s + ' '.repeat(w - s.length) : s.slice(0, w - 1) + '…');
+  const seg = (t, fg, bg, b) => ({ t, fg, bg, b });
+  const stateText = (r) => [LOOK[r.state][2], r.age].filter(Boolean).join(' ');
+  const row = (id) => rows.find((r) => r.id === id);
+
+  function sidebar() {
+    const n = rows.filter((r) => r.state === 'input').length;
+    const L = [[seg(fit(' band', W - 2), C.hi, null, 1), seg('⤢ ', C.d)],
+      [seg(fit(n ? ` ${n} need${n === 1 ? 's' : ''} input` : ' nothing waiting', W), C.d)]];
+    for (const r of rows) {
+      const [mark, col] = LOOK[r.state];
+      const on = r.id === active;
+      const bg = on ? C.act : null;
+      L.push([seg(' '.repeat(W))]);
+      L.push([seg(' ', null, bg), seg(mark, col, bg), seg(' ' + fit(r.name, W - 6), on ? C.hi : C.w, bg, on), seg(' ✕ ', C.d, bg)]);
+      if (confirm === r.id) {
+        L.push([seg(fit(' Close?  yes   no', W), C.hi, bg)]);
+      } else {
+        const lab = '   ' + stateText(r);
+        const badge = r.pr ? ' ' + r.pr[0] + ' ' : '';
+        L.push([seg(lab, col, bg), seg(fit(r.tag ? ' ' + r.tag : '', W - lab.length - badge.length), C.d, bg), seg(badge, r.pr ? r.pr[1] : null, bg)]);
+      }
+      L.push([seg(fit('   ' + r.repo, W), C.d, bg)]);
+    }
+    L.push([seg(' '.repeat(W))], [seg(fit(' + new session', W), C.d)]);
+    while (L.length < H) L.push([seg(' '.repeat(W))]);
+    return L.slice(0, H);
+  }
+
+  function pane() {
+    const src = (row(active) || {}).pane || [];
+    const out = [];
+    for (let i = 0; i < H; i++) {
+      const [t = '', fg = C.w] = src[i] || [];
+      out.push([seg(fit(' ' + t, RW), fg)]);
+    }
+    return out;
+  }
+
+  function table() {
+    const n = rows.filter((r) => r.state === 'input').length;
+    const sum = ` band   ${rows.length} sessions, ${n} need${n === 1 ? 's' : ''} input`;
+    const L = [[seg(fit(sum, TW - 11), C.hi, null, 1), seg('⤡ collapse ', C.d)], [seg(' '.repeat(TW))],
+      [seg(fit(' ' + fit('STATE', 19) + fit('SESSION', 17) + fit('REPO · BRANCH', 20) + fit('PR · CI', 14) + 'WAITING ON', TW), C.d)]];
+    const sorted = rows.map((r, i) => [r, i]).sort((a, b) => RANK[a[0].state] - RANK[b[0].state] || a[1] - b[1]).map((x) => x[0]);
+    for (const r of sorted) {
+      const [mark, col] = LOOK[r.state];
+      const on = r.id === active;
+      const bg = on ? C.act : null;
+      L.push([seg(' ', null, bg), seg(fit(`${mark} ${stateText(r)}`, 19), col, bg), seg(fit(r.name, 16) + ' ', on ? C.hi : C.w, bg, on),
+        seg(fit(r.repo, 19) + ' ', C.w, bg), seg(fit(r.pr ? r.pr[2] : '', 13) + ' ', r.pr ? r.pr[1] : C.d, bg), seg(fit(r.wait, 11), col, bg), seg(' ✕ ', C.d, bg)]);
+    }
+    while (L.length < H) L.push([seg(' '.repeat(TW))]);
+    return L;
+  }
+
+  function draw() {
+    let lines;
+    if (zoom) {
+      lines = table();
+    } else {
+      const p = pane();
+      lines = sidebar().map((l, i) => l.concat([seg('│', C.line)], p[i]));
+    }
+    const frag = document.createDocumentFragment();
+    lines.forEach((l, i) => {
+      if (i) frag.append('\n');
+      for (const s of l) {
+        const sp = document.createElement('span');
+        sp.textContent = s.t;
+        if (s.fg) sp.style.color = s.fg;
+        if (s.bg) sp.style.background = s.bg;
+        if (s.b) sp.style.fontWeight = '700';
+        frag.append(sp);
+      }
+    });
+    pre.replaceChildren(frag);
+  }
+
+  const at = (x, y) => { ptr.style.setProperty('--x', x); ptr.style.setProperty('--y', y); };
+  const click = () => { ptr.classList.remove('click'); void ptr.offsetWidth; ptr.classList.add('click'); };
+  const say = (t) => { cap.textContent = t; };
+
+  function reset() {
+    rows = [
+      { id: 1, name: 'fix login redirect', state: 'working', age: '2m', tag: '', wait: '', repo: 'web-app · fix-login', pr: null, pane: PANES.aWorking },
+      { id: 2, name: 'write migration test', state: 'input', age: '4m', tag: 'work', wait: 'Bash', repo: 'api · main', pr: ['#88 ✓', C.g, '#88 passing'], pane: PANES.bInput },
+      { id: 3, name: 'summarize PR feedback', state: 'done', age: '1h', tag: '', wait: '', repo: 'docs · review-fixes', pr: ['#318 merged', C.m, '#318 merged'], pane: PANES.c },
+    ];
+    active = 1; zoom = false; confirm = null;
+    at(70, 14);
+    say('Three sessions in one window. Orange needs input, blue is working, green is done.');
+  }
+
+  const STEPS = [
+    [0, reset],
+    [1600, () => at(14, 8)],
+    [2500, () => { click(); active = 2; say('Click a row to switch to that session.'); }],
+    [3900, () => at(37, 6)],
+    [4700, () => { click(); Object.assign(row(2), { state: 'working', age: 'now', wait: '', pane: PANES.bWorking }); say('Answer its permission prompt; the row turns blue.'); }],
+    [6300, () => { Object.assign(row(1), { state: 'done', age: 'now', pr: ['#412 ◌', C.b, '#412 running'], pane: PANES.aDone }); say('Another session finishes and opens a PR; its CI shows on the row.'); }],
+    [7800, () => at(29.5, 1)],
+    [8600, () => { click(); zoom = true; say('⤢ expands the list into a table, needs input first.'); }],
+    [10400, () => at(26, 5)],
+    [11200, () => { click(); zoom = false; active = 1; say('Click a row to jump to it. Looking at a done session greys it.'); }],
+    [12200, () => { row(1).state = 'seen'; row(1).pr = ['#412 ✓', C.g, '#412 passing']; }],
+    [13400, () => at(29, 12)],
+    [14200, () => { click(); rows = rows.filter((r) => r.id !== 3); say('✕ closes a finished session at once.'); }],
+    [15500, () => at(29, 8)],
+    [16300, () => { click(); confirm = 2; say('A working session asks first.'); }],
+    [17500, () => at(16.5, 9)],
+    [18300, () => { click(); confirm = null; }],
+    [19500, () => at(5, 12)],
+    [20300, () => { click(); rows.push({ id: 4, name: 'terminal', state: '', age: 'now', tag: '', wait: '', repo: 'web-app · fix-login', pr: null, pane: PANES.shell }); active = 4; say('+ new session opens a plain shell in the same folder; start any CLI there.'); }],
+    [23000, null],
+  ];
+
+  function play() {
+    timers = STEPS.map(([ms, fn]) => setTimeout(() => {
+      if (fn) { fn(); draw(); } else play();
+    }, ms));
+  }
+  function stop() { timers.forEach(clearTimeout); timers = []; }
+
+  btn.addEventListener('click', () => {
+    if (timers.length) { stop(); btn.textContent = 'Play'; } else { play(); btn.textContent = 'Pause'; }
+  });
+
+  reset();
+  draw();
+  if (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+    btn.textContent = 'Play';
+  } else {
+    play();
+  }
+})();
+</script>
+</body>
+</html>

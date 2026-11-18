@@ -1,0 +1,161 @@
+#!/bin/bash
+# band: one command for tmux-band.
+#   band                 attach here, or start the first session in this folder
+#   band new [...]       open a session (band-new: -n title -t tag -C dir -- cmd)
+#   band attach          bring the band window forward
+#   band restore         reopen sessions a dead tmux server took with it
+#   band install         set up (or update) ~/.local/share/band and the hooks
+#   band uninstall       remove the hooks and links
+#   band doctor          check what band needs
+#   band version | help
+
+self=$0
+while [ -L "$self" ]; do
+  link=$(readlink "$self")
+  case $link in
+    /*) self=$link ;;
+    *) self=$(dirname "$self")/$link ;;
+  esac
+done
+ROOT=$(cd "$(dirname "$self")/.." && pwd)
+
+# A package (brew, a checkout) carries the files; `band install` copies
+# them to BAND_HOME, which holds the state and the paths the hooks name.
+if [ -f "$ROOT/hooks.json" ]; then
+  B=$ROOT
+else
+  B=${BAND_HOME:-$HOME/.local/share/band}
+fi
+
+version() { cat "$1/VERSION" 2>/dev/null || echo unknown; }
+
+find_bin() {
+  for dir in /opt/homebrew/bin /usr/local/bin /usr/bin; do
+    [ -x "$dir/$1" ] && { echo "$dir/$1"; return 0; }
+  done
+  command -v "$1" 2>/dev/null
+}
+
+need_install() {
+  [ -x "$B/bin/band-new" ] && return 0
+  echo "band: not set up yet. Run: band install" >&2
+  exit 1
+}
+
+stale_note() {
+  [ "$ROOT" = "$B" ] && return 0
+  [ "$(version "$ROOT")" = "$(version "$B")" ] && return 0
+  echo "band: this package is $(version "$ROOT") but $B is $(version "$B"). Run: band install" >&2
+}
+
+usage() { sed -n '2,10p' "$self" | sed 's/^# \{0,1\}//'; }
+
+doctor() {
+  ok=0
+  line() { printf ' %s %-10s %s\n' "$1" "$2" "$3"; }
+  check() {
+    path=$(find_bin "$1")
+    if [ -n "$path" ]; then
+      line "✓" "$1" "$path"
+    elif [ "$2" = required ]; then
+      line "✗" "$1" "missing, required"
+      ok=1
+    else
+      line "·" "$1" "missing, $2"
+    fi
+  }
+  check tmux required
+  tmux=$(find_bin tmux)
+  if [ -n "$tmux" ]; then
+    v=$("$tmux" -V | sed 's/[^0-9.]*\([0-9]*\)\.\([0-9]*\).*/\1 \2/')
+    set -- $v
+    if [ "${1:-0}" -lt 3 ] || { [ "${1:-0}" -eq 3 ] && [ "${2:-0}" -lt 3 ]; }; then
+      line "✗" tmux "$("$tmux" -V) is older than 3.3"
+      ok=1
+    fi
+  fi
+  check node required
+  node=$(find_bin node)
+  if [ -n "$node" ] && ! "$node" -e 'process.exit(Number(process.versions.node.split(".")[0]) >= 18 ? 0 : 1)'; then
+    line "✗" node "$("$node" -v) is older than 18"
+    ok=1
+  fi
+  check git "repo and branch on each row"
+  check gh "pull request badges"
+  check claude "the CLI band-new starts by default"
+  if [ -d /Applications/iTerm.app ] || [ -d "$HOME/Applications/iTerm.app" ]; then
+    line "✓" iTerm2 "band attach raises its window"
+  else
+    line "·" iTerm2 "not found; band attach opens a terminal window when none is attached"
+  fi
+  if [ -x "$B/bin/band-new" ]; then
+    line "✓" install "$B ($(version "$B"))"
+  else
+    line "✗" install "run: band install"
+    ok=1
+  fi
+  if grep -q 'band-state.sh' "$HOME/.claude/settings.json" 2>/dev/null; then
+    line "✓" hooks "$HOME/.claude/settings.json"
+  else
+    line "✗" hooks "not in ~/.claude/settings.json; run: band install"
+    ok=1
+  fi
+  return $ok
+}
+
+cmd=${1:-}
+[ $# -gt 0 ] && shift
+
+case $cmd in
+  '')
+    need_install
+    stale_note
+    tmux=$(find_bin tmux)
+    [ -n "$tmux" ] || { echo "band: tmux not found" >&2; exit 1; }
+    sock=$B/state/tmux.sock
+    has() { "$tmux" -S "$sock" has-session -t '=band' 2>/dev/null; }
+    # In a terminal outside tmux, this terminal becomes the band window.
+    here=0
+    [ -t 0 ] && [ -t 1 ] && [ -z "${TMUX:-}" ] && here=1
+    if ! has; then
+      lost=$("$B/bin/band-restore" --list 2>/dev/null | grep -c .)
+      if [ "${lost:-0}" -gt 0 ] && [ $here = 1 ]; then
+        printf 'Reopen %s session%s? [Y/n] ' "$lost" "$([ "$lost" = 1 ] || echo s)"
+        read -r answer || answer=n
+        case $answer in '' | y* | Y*) "$B/bin/band-restore" --no-attach ;; esac
+      elif [ "${lost:-0}" -gt 0 ]; then
+        exec "$B/bin/band-attach"
+      fi
+    fi
+    if [ $here = 0 ]; then
+      has && exec "$B/bin/band-attach" --no-restore
+      exec "$B/bin/band-new"
+    fi
+    has || "$B/bin/band-new" --no-attach >/dev/null || exit 1
+    exec "$tmux" -S "$sock" attach -t '=band'
+    ;;
+  new) need_install; stale_note; exec "$B/bin/band-new" "$@" ;;
+  attach) need_install; stale_note; exec "$B/bin/band-attach" "$@" ;;
+  restore) need_install; stale_note; exec "$B/bin/band-restore" "$@" ;;
+  install)
+    if [ "$ROOT" = "$B" ]; then
+      echo "band: $B is the installed copy. To update, rerun the installer you used (curl or brew upgrade), then band install." >&2
+      exit 1
+    fi
+    # brew already puts `band` on PATH.
+    BAND_NO_LINK=${BAND_NO_LINK:-1} exec bash "$ROOT/install.sh" "$@"
+    ;;
+  uninstall)
+    if [ -f "$B/install.sh" ]; then exec bash "$B/install.sh" --uninstall "$@"; fi
+    [ -f "$ROOT/install.sh" ] || { echo "band: nothing installed at $B" >&2; exit 1; }
+    exec bash "$ROOT/install.sh" --uninstall "$@"
+    ;;
+  doctor) doctor ;;
+  version | -v | --version) version "$ROOT" ;;
+  help | -h | --help) usage ;;
+  *)
+    echo "band: unknown command: $cmd" >&2
+    usage >&2
+    exit 2
+    ;;
+esac

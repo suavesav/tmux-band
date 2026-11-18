@@ -1,0 +1,26 @@
+name: ci
+on:
+  push:
+    branches: [main]
+  pull_request:
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Install tmux
+        run: |
+          if [ "$RUNNER_OS" = Linux ]; then sudo apt-get update && sudo apt-get install -y tmux; else brew install tmux; fi
+      - name: Shell syntax
+        run: for f in bin/* install.sh get.sh; do bash -n "$f"; done
+      - name: Unit tests
+        run: node --test
+      - name: Smoke test
+        run: bash test/smoke.sh
