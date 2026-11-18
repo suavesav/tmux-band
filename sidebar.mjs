@@ -4,7 +4,7 @@ import { execFile } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import {
-  parseWindows, render, renderTable, hit, hitTable, needsConfirm,
+  parseWindows, render, renderTable, hit, hitTable, needsConfirm, dragBegin, dragMove, dragEnd, dragView,
   repoLabel, optionValue, prValue, SIDEBAR_WIDTH,
 } from './sidebar-core.mjs';
 
@@ -73,6 +73,8 @@ let inactiveTicks = 0;
 let lastRepo = null;
 let repoBusy = false;
 let opening = false;
+// dragBegin()'s value while a row is held.
+let drag = null;
 let lastDrawKey = '';
 let quitting = false;
 
@@ -82,7 +84,7 @@ function quit() {
   if (quitting) return;
   quitting = true;
   try {
-    process.stdout.write(`${ESC}[?1006l${ESC}[?1000l${ESC}[?25h${ESC}[0m`);
+    process.stdout.write(`${ESC}[?1006l${ESC}[?1002l${ESC}[?25h${ESC}[0m`);
   } catch { /* the pane may be gone */ }
   try {
     if (process.stdin.isTTY) process.stdin.setRawMode(false);
@@ -94,7 +96,7 @@ function draw() {
   if (quitting) return;
   const { width, height } = size();
   const now = Math.floor(Date.now() / 1000);
-  const lines = (zoomed ? renderTable : render)({ rows, width, height, confirm, now }).split('\n');
+  const lines = (zoomed ? renderTable : render)({ ...dragView(rows, drag, Date.now()), width, height, confirm, now }).split('\n');
   const key = `${zoomed}:${width}:${height}`;
   let out = '';
   if (key !== lastDrawKey) out += `${ESC}[2J`;
@@ -301,6 +303,7 @@ async function tickBody() {
     mine.state = 'seen';
   }
   if (confirm !== null && !rows.some((r) => r.id === confirm)) confirm = null;
+  if (drag && !rows.some((r) => r.id === drag.id)) drag = null;
   draw();
 }
 
@@ -361,12 +364,6 @@ async function click(x, y) {
       await setZoom(false);
       await focusSession(ownWindow);
       break;
-    case 'select':
-      confirm = null;
-      await setZoom(false);
-      await tmux(['select-window', '-t', result.id]);
-      await focusSession(result.id);
-      break;
     case 'close': {
       const row = rows.find((r) => r.id === result.id);
       if (row && needsConfirm(row.state)) {
@@ -391,12 +388,56 @@ async function click(x, y) {
       break;
     default:
   }
-  if (!zoomed && !['select', 'collapse', 'new'].includes(result.kind)) await focusSession(ownWindow);
+  if (!zoomed && !['collapse', 'new'].includes(result.kind)) await focusSession(ownWindow);
   await tick();
   draw();
 }
 
+// press() takes every `select` hit, so click() never sees one.
+async function select(id) {
+  confirm = null;
+  await setZoom(false);
+  await tmux(['select-window', '-t', id]);
+  await focusSession(id);
+  await tick();
+  draw();
+}
+
+function press(x, y) {
+  const stale = drag;
+  drag = null;
+  if (stale) draw();
+  const { width, height } = size();
+  const result = (zoomed ? hitTable : hit)({ x, y, rows, width, height, confirm });
+  if (result.kind !== 'select') return click(x, y);
+  drag = dragBegin({ id: result.id, y, rows, height, zoomed, now: Date.now() });
+  return Promise.resolve();
+}
+
+function dragTo(y) {
+  if (!drag) return;
+  drag = dragMove(drag, { y, rows, height: size().height, zoomed, now: Date.now() });
+  draw();
+}
+
+async function release() {
+  const held = drag;
+  drag = null;
+  const end = dragEnd(held, rows);
+  if (end.kind === 'select') return select(end.id);
+  if (end.kind === 'move') {
+    confirm = null;
+    // The current window is an index, so a move can change which window it is.
+    const active = rows.find((r) => r.active)?.id;
+    await tmux([...end.args, ';', 'move-window', '-r', '-t', '=band:', ...(active ? [';', 'select-window', '-t', active] : [])]);
+    if (!zoomed) await focusSession(ownWindow);
+    await tick();
+  }
+  draw();
+}
+
 async function keypress() {
+  drag = null;
   zoomEpoch++;
   zoomed = false;
   await focusSession(ownWindow);
@@ -409,7 +450,10 @@ function onInput(chunk) {
   let any = false;
   for (const m of String(chunk).matchAll(mouse)) {
     any = true;
-    if (m[4] === 'M' && m[1] === '0') click(Number(m[2]), Number(m[3])).catch((e) => log(`click: ${e?.stack || e}`));
+    const fail = (e) => log(`mouse: ${e?.stack || e}`);
+    if (m[4] === 'M' && m[1] === '0') press(Number(m[2]), Number(m[3])).catch(fail);
+    else if (m[4] === 'M' && m[1] === '32') dragTo(Number(m[3]));
+    else if (m[4] === 'm' && m[1] === '0') release().catch(fail);
   }
   if (!any) keypress().catch((e) => log(`key: ${e?.stack || e}`));
 }
@@ -421,7 +465,7 @@ process.on('unhandledRejection', (e) => log(`unhandled: ${e?.stack || e}`));
 for (const signal of ['SIGHUP', 'SIGTERM', 'SIGINT']) process.on(signal, quit);
 process.stdout.on('error', quit);
 
-process.stdout.write(`${ESC}[?1000h${ESC}[?1006h${ESC}[?25l`);
+process.stdout.write(`${ESC}[?1002h${ESC}[?1006h${ESC}[?25l`);
 if (process.stdin.isTTY) process.stdin.setRawMode(true);
 process.stdin.setEncoding('utf8');
 process.stdin.on('data', onInput);

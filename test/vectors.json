@@ -315,9 +315,9 @@
     " ● needs input 31m  plan the importer            etl · main                                                plan approval       opus · plan          ✕ ",
     " ● needs input 4m   fix login redirect           web-app · fix-login           #412 failing                permission: Bash    sonnet · default     ✕ ",
     " ◌ working 12m      write migration test for 00… api · main                    #88 running, #90 passing                                             ✕ ",
-    " ·                  no state yet                 scratch                       #7 closed                                                            ✕ ",
     " ✓ done 1h          summarize PR feedback        docs · review-fixes           #318 merged                                                          ✕ ",
-    " ✓ 2d               修复 bug 🐛 emoji            web · main                                                                                         ✕ "
+    " ✓ 2d               修复 bug 🐛 emoji            web · main                                                                                         ✕ ",
+    " ·                  no state yet                 scratch                       #7 closed                                                            ✕ "
    ],
    "raw": [
     "\u001b[1m band   6 sessions, 2 need input                                                                                                           \u001b[22m\u001b[38;5;244m⤡ collapse \u001b[39m",
@@ -326,9 +326,9 @@
     " \u001b[38;5;214m● needs input 31m  \u001b[39mplan the importer            etl · main                    \u001b[38;5;244m                            \u001b[39m\u001b[38;5;214mplan approval       \u001b[39m\u001b[38;5;244mopus · plan         \u001b[39m\u001b[38;5;244m ✕ \u001b[39m\u001b[0m",
     "\u001b[48;5;237m \u001b[38;5;214m● needs input 4m   \u001b[39m\u001b[1mfix login redirect          \u001b[22m web-app · fix-login           \u001b[38;5;203m#412 failing                \u001b[39m\u001b[38;5;214mpermission: Bash    \u001b[39m\u001b[38;5;244msonnet · default    \u001b[39m\u001b[38;5;244m ✕ \u001b[39m\u001b[0m",
     " \u001b[38;5;75m◌ working 12m      \u001b[39mwrite migration test for 00… api · main                    \u001b[38;5;75m#88 running, #90 passing    \u001b[39m\u001b[38;5;75m                    \u001b[39m\u001b[38;5;244m                    \u001b[39m\u001b[38;5;244m ✕ \u001b[39m\u001b[0m",
-    " \u001b[38;5;244m·                  \u001b[39mno state yet                 scratch                       \u001b[38;5;244m#7 closed                   \u001b[39m\u001b[38;5;244m                    \u001b[39m\u001b[38;5;244m                    \u001b[39m\u001b[38;5;244m ✕ \u001b[39m\u001b[0m",
     " \u001b[38;5;71m✓ done 1h          \u001b[39msummarize PR feedback        docs · review-fixes           \u001b[38;5;141m#318 merged                 \u001b[39m\u001b[38;5;71m                    \u001b[39m\u001b[38;5;244m                    \u001b[39m\u001b[38;5;244m ✕ \u001b[39m\u001b[0m",
-    " \u001b[38;5;244m✓ 2d               \u001b[39m修复 bug 🐛 emoji            web · main                    \u001b[38;5;244m                            \u001b[39m\u001b[38;5;244m                    \u001b[39m\u001b[38;5;244m                    \u001b[39m\u001b[38;5;244m ✕ \u001b[39m\u001b[0m"
+    " \u001b[38;5;244m✓ 2d               \u001b[39m修复 bug 🐛 emoji            web · main                    \u001b[38;5;244m                            \u001b[39m\u001b[38;5;244m                    \u001b[39m\u001b[38;5;244m                    \u001b[39m\u001b[38;5;244m ✕ \u001b[39m\u001b[0m",
+    " \u001b[38;5;244m·                  \u001b[39mno state yet                 scratch                       \u001b[38;5;244m#7 closed                   \u001b[39m\u001b[38;5;244m                    \u001b[39m\u001b[38;5;244m                    \u001b[39m\u001b[38;5;244m ✕ \u001b[39m\u001b[0m"
    ]
   },
   {
@@ -352,9 +352,9 @@
     " ● needs input 31m  plan the importer  etl · main                                                 ✕ ",
     " ● needs input 4m   fix login redirect web-app · fix-login           #412 failing                 ✕ ",
     " ◌ working 12m      write migration t… api · main                    #88 running, #90 passing     ✕ ",
-    " ·                  no state yet       scratch                       #7 closed                    ✕ ",
     " Close?  yes   no                                                                                   ",
-    " ✓ 2d               修复 bug 🐛 emoji  web · main                                                 ✕ "
+    " ✓ 2d               修复 bug 🐛 emoji  web · main                                                 ✕ ",
+    " ·                  no state yet       scratch                       #7 closed                    ✕ "
    ],
    "raw": [
     "\u001b[1m band   6 sessions, 2 need input                                                         \u001b[22m\u001b[38;5;244m⤡ collapse \u001b[39m",
@@ -363,9 +363,9 @@
     " \u001b[38;5;214m● needs input 31m  \u001b[39mplan the importer  etl · main                    \u001b[38;5;244m                            \u001b[39m\u001b[38;5;244m ✕ \u001b[39m\u001b[0m",
     "\u001b[48;5;237m \u001b[38;5;214m● needs input 4m   \u001b[39m\u001b[1mfix login redirect\u001b[22m web-app · fix-login           \u001b[38;5;203m#412 failing                \u001b[39m\u001b[38;5;244m ✕ \u001b[39m\u001b[0m",
     " \u001b[38;5;75m◌ working 12m      \u001b[39mwrite migration t… api · main                    \u001b[38;5;75m#88 running, #90 passing    \u001b[39m\u001b[38;5;244m ✕ \u001b[39m\u001b[0m",
-    " \u001b[38;5;244m·                  \u001b[39mno state yet       scratch                       \u001b[38;5;244m#7 closed                   \u001b[39m\u001b[38;5;244m ✕ \u001b[39m\u001b[0m",
     " Close?  yes   no                                                                                   \u001b[0m",
-    " \u001b[38;5;244m✓ 2d               \u001b[39m修复 bug 🐛 emoji  web · main                    \u001b[38;5;244m                            \u001b[39m\u001b[38;5;244m ✕ \u001b[39m\u001b[0m"
+    " \u001b[38;5;244m✓ 2d               \u001b[39m修复 bug 🐛 emoji  web · main                    \u001b[38;5;244m                            \u001b[39m\u001b[38;5;244m ✕ \u001b[39m\u001b[0m",
+    " \u001b[38;5;244m·                  \u001b[39mno state yet       scratch                       \u001b[38;5;244m#7 closed                   \u001b[39m\u001b[38;5;244m ✕ \u001b[39m\u001b[0m"
    ]
   },
   {
@@ -579,6 +579,152 @@
    ]
   },
   {
+   "name": "normal 30x24, row @3 held (being dragged)",
+   "view": "normal",
+   "width": 30,
+   "height": 24,
+   "confirm": null,
+   "dragging": "@3",
+   "rows": [
+    0,
+    1,
+    2,
+    3,
+    4,
+    5
+   ],
+   "text": [
+    " band                       ⤢ ",
+    " 2 need input                 ",
+    "                              ",
+    " ● plan the importer        ✕ ",
+    "   needs input 31m work       ",
+    "   etl · main                 ",
+    "                              ",
+    " ● fix login redirect       ✕ ",
+    "   needs input 4m      #412 ✗ ",
+    "   web-app · fix-login        ",
+    "                              ",
+    " ↕ write migration test fo… ✕ ",
+    "   working 12m        #88+1 ◌ ",
+    "   api · main                 ",
+    "                              ",
+    " ✓ summarize PR feedback    ✕ ",
+    "   done 1h work   #318 merged ",
+    "   docs · review-fixes        ",
+    "                              ",
+    " ✓ 修复 bug 🐛 emoji        ✕ ",
+    "   2d                         ",
+    "   web · main                 ",
+    "                              ",
+    " + new session                "
+   ],
+   "raw": [
+    "\u001b[1m band                       \u001b[22m\u001b[38;5;244m⤢ \u001b[39m",
+    "\u001b[38;5;244m 2 need input                 \u001b[39m",
+    "                              ",
+    " \u001b[38;5;214m●\u001b[39m plan the importer       \u001b[38;5;244m ✕ \u001b[39m\u001b[0m",
+    "\u001b[38;5;214m   needs input 31m\u001b[39m\u001b[38;5;244m work       \u001b[39m\u001b[0m",
+    "\u001b[38;5;244m   etl · main                 \u001b[39m\u001b[0m",
+    "                              ",
+    "\u001b[48;5;237m \u001b[38;5;214m●\u001b[39m \u001b[1mfix login redirect      \u001b[22m\u001b[38;5;244m ✕ \u001b[39m\u001b[0m",
+    "\u001b[48;5;237m\u001b[38;5;214m   needs input 4m\u001b[39m\u001b[38;5;244m     \u001b[39m\u001b[38;5;203m #412 ✗ \u001b[39m\u001b[0m",
+    "\u001b[48;5;237m\u001b[38;5;244m   web-app · fix-login        \u001b[39m\u001b[0m",
+    "                              ",
+    "\u001b[48;5;239m \u001b[38;5;75m↕\u001b[39m write migration test fo…\u001b[38;5;244m ✕ \u001b[39m\u001b[0m",
+    "\u001b[48;5;239m\u001b[38;5;75m   working 12m\u001b[39m\u001b[38;5;244m       \u001b[39m\u001b[38;5;75m #88+1 ◌ \u001b[39m\u001b[0m",
+    "\u001b[48;5;239m\u001b[38;5;244m   api · main                 \u001b[39m\u001b[0m",
+    "                              ",
+    " \u001b[38;5;71m✓\u001b[39m summarize PR feedback   \u001b[38;5;244m ✕ \u001b[39m\u001b[0m",
+    "\u001b[38;5;71m   done 1h\u001b[39m\u001b[38;5;244m work  \u001b[39m\u001b[38;5;141m #318 merged \u001b[39m\u001b[0m",
+    "\u001b[38;5;244m   docs · review-fixes        \u001b[39m\u001b[0m",
+    "                              ",
+    " \u001b[38;5;244m✓\u001b[39m 修复 bug 🐛 emoji       \u001b[38;5;244m ✕ \u001b[39m\u001b[0m",
+    "\u001b[38;5;244m   2d\u001b[39m\u001b[38;5;244m                         \u001b[39m\u001b[0m",
+    "\u001b[38;5;244m   web · main                 \u001b[39m\u001b[0m",
+    "                              ",
+    "\u001b[38;5;244m + new session                \u001b[39m"
+   ]
+  },
+  {
+   "name": "normal 30x12, the active row held",
+   "view": "normal",
+   "width": 30,
+   "height": 12,
+   "confirm": null,
+   "dragging": "@2",
+   "rows": [
+    0,
+    1
+   ],
+   "text": [
+    " band                       ⤢ ",
+    " 2 need input                 ",
+    "                              ",
+    " ● plan the importer        ✕ ",
+    "   needs input 31m work       ",
+    "   etl · main                 ",
+    "                              ",
+    " ↕ fix login redirect       ✕ ",
+    "   needs input 4m      #412 ✗ ",
+    "   web-app · fix-login        ",
+    "                              ",
+    " + new session                "
+   ],
+   "raw": [
+    "\u001b[1m band                       \u001b[22m\u001b[38;5;244m⤢ \u001b[39m",
+    "\u001b[38;5;244m 2 need input                 \u001b[39m",
+    "                              ",
+    " \u001b[38;5;214m●\u001b[39m plan the importer       \u001b[38;5;244m ✕ \u001b[39m\u001b[0m",
+    "\u001b[38;5;214m   needs input 31m\u001b[39m\u001b[38;5;244m work       \u001b[39m\u001b[0m",
+    "\u001b[38;5;244m   etl · main                 \u001b[39m\u001b[0m",
+    "                              ",
+    "\u001b[48;5;239m \u001b[38;5;75m↕\u001b[39m \u001b[1mfix login redirect      \u001b[22m\u001b[38;5;244m ✕ \u001b[39m\u001b[0m",
+    "\u001b[48;5;239m\u001b[38;5;214m   needs input 4m\u001b[39m\u001b[38;5;244m     \u001b[39m\u001b[38;5;203m #412 ✗ \u001b[39m\u001b[0m",
+    "\u001b[48;5;239m\u001b[38;5;244m   web-app · fix-login        \u001b[39m\u001b[0m",
+    "                              ",
+    "\u001b[38;5;244m + new session                \u001b[39m"
+   ]
+  },
+  {
+   "name": "table 100x12, row @4 held",
+   "view": "table",
+   "width": 100,
+   "height": 12,
+   "confirm": null,
+   "dragging": "@4",
+   "rows": [
+    0,
+    1,
+    2,
+    3,
+    4,
+    5
+   ],
+   "text": [
+    " band   6 sessions, 2 need input                                                         ⤡ collapse ",
+    "                                                                                                    ",
+    " STATE              SESSION            REPO · BRANCH                 PR · CI                        ",
+    " ● needs input 31m  plan the importer  etl · main                                                 ✕ ",
+    " ● needs input 4m   fix login redirect web-app · fix-login           #412 failing                 ✕ ",
+    " ◌ working 12m      write migration t… api · main                    #88 running, #90 passing     ✕ ",
+    " ↕ done 1h          summarize PR feed… docs · review-fixes           #318 merged                  ✕ ",
+    " ✓ 2d               修复 bug 🐛 emoji  web · main                                                 ✕ ",
+    " ·                  no state yet       scratch                       #7 closed                    ✕ "
+   ],
+   "raw": [
+    "\u001b[1m band   6 sessions, 2 need input                                                         \u001b[22m\u001b[38;5;244m⤡ collapse \u001b[39m",
+    "                                                                                                    ",
+    "\u001b[38;5;244m STATE              SESSION            REPO · BRANCH                 PR · CI                        \u001b[39m",
+    " \u001b[38;5;214m● needs input 31m  \u001b[39mplan the importer  etl · main                    \u001b[38;5;244m                            \u001b[39m\u001b[38;5;244m ✕ \u001b[39m\u001b[0m",
+    "\u001b[48;5;237m \u001b[38;5;214m● needs input 4m   \u001b[39m\u001b[1mfix login redirect\u001b[22m web-app · fix-login           \u001b[38;5;203m#412 failing                \u001b[39m\u001b[38;5;244m ✕ \u001b[39m\u001b[0m",
+    " \u001b[38;5;75m◌ working 12m      \u001b[39mwrite migration t… api · main                    \u001b[38;5;75m#88 running, #90 passing    \u001b[39m\u001b[38;5;244m ✕ \u001b[39m\u001b[0m",
+    "\u001b[48;5;239m \u001b[38;5;75m↕\u001b[39m\u001b[38;5;71m done 1h          \u001b[39msummarize PR feed… docs · review-fixes           \u001b[38;5;141m#318 merged                 \u001b[39m\u001b[38;5;244m ✕ \u001b[39m\u001b[0m",
+    " \u001b[38;5;244m✓ 2d               \u001b[39m修复 bug 🐛 emoji  web · main                    \u001b[38;5;244m                            \u001b[39m\u001b[38;5;244m ✕ \u001b[39m\u001b[0m",
+    " \u001b[38;5;244m·                  \u001b[39mno state yet       scratch                       \u001b[38;5;244m#7 closed                   \u001b[39m\u001b[38;5;244m ✕ \u001b[39m\u001b[0m"
+   ]
+  },
+  {
    "name": "normal 8x2 (header with ⤢)",
    "view": "normal",
    "width": 8,
@@ -714,8 +860,8 @@
     " ● needs input 31m  plan the importer                     ✕ ",
     " ● needs input 4m   fix login redirect                    ✕ ",
     " ◌ working 12m      write migration test for 0042 rollb…  ✕ ",
-    " ·                  no state yet                          ✕ ",
-    " ✓ done 1h          summarize PR feedback                 ✕ "
+    " ✓ done 1h          summarize PR feedback                 ✕ ",
+    " ✓ 2d               修复 bug 🐛 emoji                     ✕ "
    ],
    "raw": [
     "\u001b[1m band   6 sessions, 2 need input                 \u001b[22m\u001b[38;5;244m⤡ collapse \u001b[39m",
@@ -724,8 +870,8 @@
     " \u001b[38;5;214m● needs input 31m  \u001b[39mplan the importer                    \u001b[38;5;244m ✕ \u001b[39m\u001b[0m",
     "\u001b[48;5;237m \u001b[38;5;214m● needs input 4m   \u001b[39m\u001b[1mfix login redirect                  \u001b[22m \u001b[38;5;244m ✕ \u001b[39m\u001b[0m",
     " \u001b[38;5;75m◌ working 12m      \u001b[39mwrite migration test for 0042 rollb… \u001b[38;5;244m ✕ \u001b[39m\u001b[0m",
-    " \u001b[38;5;244m·                  \u001b[39mno state yet                         \u001b[38;5;244m ✕ \u001b[39m\u001b[0m",
-    " \u001b[38;5;71m✓ done 1h          \u001b[39msummarize PR feedback                \u001b[38;5;244m ✕ \u001b[39m\u001b[0m"
+    " \u001b[38;5;71m✓ done 1h          \u001b[39msummarize PR feedback                \u001b[38;5;244m ✕ \u001b[39m\u001b[0m",
+    " \u001b[38;5;244m✓ 2d               \u001b[39m修复 bug 🐛 emoji                    \u001b[38;5;244m ✕ \u001b[39m\u001b[0m"
    ]
   }
  ]

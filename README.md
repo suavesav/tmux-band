@@ -1,6 +1,6 @@
 # tmux-band
 
-**You take the solo. Your agents are the band.**
+**Conduct your band from one place.**
 
 One terminal window for every Claude Code session you have running. A sidebar shows who is working, who is done, and who is waiting on you.
 
@@ -34,8 +34,9 @@ Then use the mouse:
 | Click | What happens |
 | --- | --- |
 | a row | jump to that session |
+| drag a row | reorder the list |
 | `✕` | close it (asks first unless it is done) |
-| `⤢` | expand the list into a table, whoever is waiting on top |
+| `⤢` | expand the list into a table with every detail |
 | `+ new session` | a plain shell in the same folder, for any CLI you like |
 
 Close the terminal window whenever you want. The sessions keep running; `band` brings them back.

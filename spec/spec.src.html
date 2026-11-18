@@ -85,7 +85,7 @@ li { margin: 4px 0; }
 
 <div class="summary">
 <dl>
-  <dt>What</dt><dd>A dedicated tmux server with one session (<code>band</code>). Each Claude Code session is one tmux window: a 30-column sidebar pane on the left, the CLI on the right. The sidebar lists every window with a colored state (needs input, working, done), time in that state, repo · branch, and the session's pull requests with CI state. Click a row to switch, ✕ to close, ⤢ to expand to a full-width table, <code>+ new session</code> to open a shell window in the same folder. <code>band-attach</code> brings the iTerm window forward and reopens the sessions a dead tmux server took with it.</dd>
+  <dt>What</dt><dd>A dedicated tmux server with one session (<code>band</code>). Each Claude Code session is one tmux window: a 30-column sidebar pane on the left, the CLI on the right. The sidebar lists every window with a colored state (needs input, working, done), time in that state, repo · branch, and the session's pull requests with CI state. Click a row to switch, drag it to reorder, ✕ to close, ⤢ to expand to a full-width table, <code>+ new session</code> to open a shell window in the same folder. <code>band-attach</code> brings the iTerm window forward and reopens the sessions a dead tmux server took with it.</dd>
   <dt>How it works</dt><dd>State lives in tmux <b>window user options</b> (<code>@band_state</code>, <code>@band_since</code>, …). Claude Code hooks write them from inside the pane using <code>$TMUX_PANE</code>, and keep one record file per open session for restore. Each window's sidebar is a Node program that polls <code>tmux list-windows -F</code> once a second, draws with ANSI escapes, reads SGR mouse clicks from stdin, and polls <code>gh</code> for the PRs its session's transcript mentions.</dd>
   <dt>Where it lives</dt><dd>One directory, <code>$BAND_HOME</code> (default <code>~/.local/share/band</code>): <code>bin/</code> (<code>band-new</code>, <code>band-attach</code>, <code>band-restore</code>, <code>band-state.sh</code>, <code>band-record.sh</code>), <code>sidebar.mjs</code>, <code>sidebar-core.mjs</code>, <code>hooks.mjs</code>, <code>tmux.conf</code>, <code>hooks.json</code>, and <code>state/</code>. An installer links <code>bin/</code> into <code>~/.local/bin</code> and adds the hooks to <code>~/.claude/settings.json</code>.</dd>
   <dt>The hard parts</dt><dd>Holding the sidebar at 30 columns without breaking zoom (<code>resize-pane -x</code> unzooms a window); hit-testing clicks against the layout that was drawn; telling "closed" from "lost with the server" at session end; tmux format expansion in window names; tmux reading <code>-f</code> only at server start.</dd>
@@ -134,6 +134,7 @@ li { margin: 4px 0; }
   <li>✕ on a row closes that window. If the state is not <code>done</code> or <code>seen</code>, the row's state line becomes <code> Close?  yes   no</code> first.</li>
   <li><code>+ new session</code>, under the last row, opens a new window with a sidebar and a plain login shell, in the folder of the window it was clicked in, and switches to it. No CLI starts: the user picks the account and provider by what they type.</li>
   <li>⤢ expands to the table view; ⤡, any key, or clicking a row (which also switches to it) collapses.</li>
+  <li>Both views list the sessions in one order, the tmux window order. Dragging a row in either view moves it; the list previews the new order while the row is held, and every window's sidebar shows the result.</li>
   <li>The sidebar stays 30 columns wide across terminal resizes and window switches.</li>
   <li>Does not touch the user's own <code>~/.tmux.conf</code> or any other tmux server.</li>
 </ol>
@@ -147,7 +148,7 @@ li { margin: 4px 0; }
   <li><code>SOCK=B/state/tmux.sock</code>. Every tmux call is <code>"$TMUX_BIN" -S "$SOCK" …</code> (quoted, so a <code>B</code> with spaces works). Only <code>band-new</code> adds <code>-f B/tmux.conf</code>, because only it can start the server.</li>
   <li><b>File age</b> in seconds: <code>$(date +%s)</code> minus the mtime from <code>stat -f %m</code> (macOS), falling back to <code>stat -c %Y</code> (Linux).</li>
   <li>tmux <code>-F</code> formats in this spec separate fields with a real tab character (written <code>\t</code> here).</li>
-  <li>Escape sequences are written with spaces between them for reading (<code>ESC[?1000h ESC[?1006h</code>); the bytes have no spaces.</li>
+  <li>Escape sequences are written with spaces between them for reading (<code>ESC[?1002h ESC[?1006h</code>); the bytes have no spaces.</li>
 </ul>
 <div class="scroll"><table>
 <tr><th>Path</th><th>Content</th></tr>
@@ -374,11 +375,13 @@ exit 0</code></pre>
 <div class="scroll"><table>
 <tr><th>Export</th><th>Signature → result</th></tr>
 <tr><td><code>parseWindows</code></td><td><code>(listWindowsStdout) → [{ id, active, state, tag, since, wait, model, repo, pr, name }]</code></td></tr>
-<tr><td><code>render</code>, <code>renderTable</code></td><td><code>({ rows, width, height, confirm = null, now = 0 }) → string</code>, lines joined with <code>\n</code>; <code>confirm</code> is a window id; <code>now</code> in epoch seconds</td></tr>
-<tr><td><code>layout</code></td><td><code>({ rows, height }) → [{ row, top }]</code></td></tr>
+<tr><td><code>render</code>, <code>renderTable</code></td><td><code>({ rows, width, height, confirm = null, now = 0, dragging = null, start = null }) → string</code>, lines joined with <code>\n</code>; <code>confirm</code> is a window id; <code>now</code> in epoch seconds</td></tr>
+<tr><td><code>layout</code></td><td><code>({ rows, height, start = null }) → [{ row, top }]</code></td></tr>
 <tr><td><code>newLine</code></td><td><code>({ rows, height }) → number</code>, the 1-based line of <code>+ new session</code></td></tr>
-<tr><td><code>tableLayout</code></td><td><code>({ rows, height }) → [{ row, y }]</code></td></tr>
-<tr><td><code>tableRows</code></td><td><code>(rows) → rows</code> sorted</td></tr>
+<tr><td><code>tableLayout</code></td><td><code>({ rows, height, start = null }) → [{ row, y }]</code></td></tr>
+<tr><td><code>dragBegin</code>, <code>dragMove</code>, <code>dragEnd</code>, <code>dragView</code>, <code>dragRows</code></td><td>the drag state machine (7.6)</td></tr>
+<tr><td><code>moveId</code></td><td><code>(ids, id, over) → ids</code></td></tr>
+<tr><td><code>moveArgs</code></td><td><code>(order, id) → [tmux argument] | null</code></td></tr>
 <tr><td><code>hit</code>, <code>hitTable</code></td><td><code>({ x, y, rows, width, height, confirm }) → { kind, id }</code>; kind is <code>expand</code>, <code>collapse</code>, <code>select</code>, <code>close</code>, <code>yes</code>, <code>no</code>, <code>new</code> (normal view only) or <code>none</code>; id is the window id or null</td></tr>
 <tr><td><code>needsConfirm</code></td><td><code>(state) → boolean</code></td></tr>
 <tr><td><code>age</code></td><td><code>(now, since) → string</code></td></tr>
@@ -399,6 +402,7 @@ exit 0</code></pre>
 <tr><td>confirm text</td><td><code> Close?  yes   no</code>; yes = columns 10–12, no = 16–17</td></tr>
 <tr><td>collapse text</td><td><code>⤡ collapse </code> (11 columns)</td></tr>
 <tr><td>dim / active background</td><td>256-color 244 / 237</td></tr>
+<tr><td>held row (being dragged)</td><td>background 239; mark <code>↕</code> in 75</td></tr>
 <tr><td>badge minimum room</td><td>12</td></tr>
 <tr><td>max PRs per window</td><td>3</td></tr>
 </table></div>
@@ -436,6 +440,7 @@ exit 0</code></pre>
   <li><b>layout({rows, height})</b>: capacity = max(0, ⌊(height − 2 − 2)/4⌋) (the last 2 are kept for the new-session line); activeAt = index of the active row, or 0; start = 0 if all fit, else max(0, min(activeAt − capacity + 1, n − capacity)). Returns <code>{ row, top }</code> for rows start…start+capacity−1, where <code>top = 3 + 4i</code> is the 1-based line of the row's blank spacer.</li>
   <li><b>Line 1</b>: if width &gt; 7, <code>bold(fit(' band', width − 2)) + fg(244, '⤢ ')</code>; else <code>bold(fit(' band', width))</code>.</li>
   <li><b>Line 2</b>: <code>fg(244, fit(text, width))</code>, text <code> 1 needs input</code>, <code> N need input</code>, or <code> nothing waiting</code>.</li>
+  <li><b>A held row</b> (<code>dragging</code> is its id) uses background 239 in place of the active background, and <code>fg(75, '↕')</code> in place of its state mark on the title line. Nothing else about it changes.</li>
   <li><b>Per row</b>, four lines:
     <ol>
       <li><code>fit('', width)</code> (no escapes).</li>
@@ -448,11 +453,11 @@ exit 0</code></pre>
   <li><b>hit({x, y, …})</b> (1-based): <code>y = 1</code> and <code>x &gt; width − 3</code> → <code>expand</code>. <code>y = newLine</code> and <code>x ≤ 14</code> → <code>new</code>. Else find the laid-out row with <code>top ≤ y &lt; top + 4</code>; <code>line = y − top</code>. If confirming that row and line is 2: yes (x 10–12), no (16–17), else none. Line 1 and <code>x &gt; width − 3</code> → <code>close</code>. Any other line of the row, the spacer included → <code>select</code>. No row → <code>none</code>.</li>
 </ul>
 
-<h3>7.4 Table view: <code>tableRows</code>, <code>renderTable</code>, <code>hitTable</code></h3>
+<h3>7.4 Table view: <code>renderTable</code>, <code>hitTable</code></h3>
 <ul>
   <li><b>Columns</b> in order: STATE 19, SESSION 16 (flex), REPO · BRANCH 30, PR · CI 28, WAITING ON 20, MODEL · MODE 20. Drop columns from the right while more than two remain and <code>1 + Σwidths + 3 &gt; width</code>. Then SESSION's width becomes <code>max(16, 16 + width − total)</code>, where total = <code>1 + Σwidths + 3</code> over the columns kept. A table narrower than the two kept columns (39) is drawn wider than the pane, not clipped. <code>renderTable</code> also returns only the first <code>height</code> lines. <code>id</code> is null for none, expand and collapse, and the confirming row for yes and no.</li>
-  <li><b>tableRows</b>: rank input 0, working 1, empty 1, done 2, seen 3, unknown 1. Sort by rank; among <code>input</code> rows by <code>since</code> ascending (0 counts as infinity); ties keep tmux order.</li>
-  <li><b>tableLayout</b>: capacity = max(0, height − 3); same start rule as <code>layout</code> on the sorted list; row <code>i</code> is on line <code>4 + i</code>.</li>
+  <li><b>Order</b>: the rows as given, which is the tmux window order. No sorting by state. A held row draws its state cell as <code>fg(75, '↕') + fg(color, fit(' ' + stateText, 18))</code> and uses background 239.</li>
+  <li><b>tableLayout</b>: capacity = max(0, height − 3); same start rule as <code>layout</code>; row <code>i</code> is on line <code>4 + i</code>.</li>
   <li><b>Line 1</b>: summary <code> band   N session(s), M need(s) input</code> (<code>1 session</code>, <code>1 needs</code>). If width &gt; 17: <code>bold(fit(summary, width − 11)) + fg(244, '⤡ collapse ')</code>; else <code>bold(fit(summary, width))</code>. <b>Line 2</b>: <code>fit('', width)</code>. <b>Line 3</b>: <code>fg(244, fit(' ' + titles each fit to its width, joined, width))</code>.</li>
   <li><b>Rows</b>: confirming → background + <code>fit(' Close?  yes   no', width)</code> + <code>ESC[0m</code>. Else background + <code>' '</code> + cells + spaces to fill <code>max(0, width − (1 + Σwidths) − 3)</code> + <code>fg(244, ' ✕ ')</code> + <code>ESC[0m</code>. Cells at column width w:
     <ul>
@@ -476,7 +481,7 @@ exit 0</code></pre>
 </ul>
 
 <h3>7.6 The program loop (<code>sidebar.mjs</code>)</h3>
-<p><b>Start:</b> write <code>ESC[?1000h ESC[?1006h ESC[?25l</code>; stdin raw mode (when a TTY), UTF-8. <b>Exit</b> (SIGHUP, SIGTERM, SIGINT, stdin end, or the quit conditions below): write <code>ESC[?1006l ESC[?1000l ESC[?25h ESC[0m</code>, leave raw mode, exit 0. Size = <code>stdout.columns || 30</code> by <code>stdout.rows || 24</code>. Start a 1 s interval running <code>tick</code>, and run one tick at once.</p>
+<p><b>Start:</b> write <code>ESC[?1002h ESC[?1006h ESC[?25l</code> (1002 reports presses, releases and motion while a button is down); stdin raw mode (when a TTY), UTF-8. <b>Exit</b> (SIGHUP, SIGTERM, SIGINT, stdin end, or the quit conditions below): write <code>ESC[?1006l ESC[?1002l ESC[?25h ESC[0m</code>, leave raw mode, exit 0. Size = <code>stdout.columns || 30</code> by <code>stdout.rows || 24</code>. Start a 1 s interval running <code>tick</code>, and run one tick at once.</p>
 <p><b>tick</b> (skip if a tick is in progress):</p>
 <ol>
   <li>Remember <code>epoch = zoomEpoch</code>. <code>display-message -p -t $TMUX_PANE '#{window_id}\t#{pane_width}\t#{window_panes}\t#{session_attached}\t#{window_active}\t#{window_zoomed_flag}'</code>. On failure count it; at 3 consecutive failures quit; return. A window id that does not match <code>^@\d+$</code> is a failure too: for a pane that is gone, tmux 3.8 prints an empty line and exits 0. Else reset the count.</li>
@@ -495,20 +500,38 @@ exit 0</code></pre>
 <p><b>draw:</b> render with <code>now = ⌊Date.now()/1000⌋</code> (table when zoomed). If <code>zoomed:width:height</code> changed since the last draw, prefix <code>ESC[2J</code>. Write each line <code>i</code> at <code>ESC[{i+1};1H</code>; if fewer lines than height, follow with <code>ESC[{n+1};1H ESC[J</code>. Also redraw on stdout resize.</p>
 <p><b>setZoom(on):</b> <code>zoomEpoch++</code>; <code>zoomed = on</code>; <code>if-shell -F -t $TMUX_PANE '#{==:#{window_zoomed_flag},&lt;on ? 0 : 1&gt;}' 'resize-pane -Z -t $TMUX_PANE'</code>. (<code>resize-pane -Z</code> toggles; the epoch stops a tick that read the flag before the click from writing it back.) <b>focusSession(w)</b> = <code>select-pane -t &lt;w&gt;.1</code>.</p>
 <p><b>Click timing.</b> Hit-testing uses stdout's size, which can lag tmux's pane size for a moment after a zoom change, and a tick that started after a click can read the zoom flag before the zoom command lands. The reference build accepts both; a build may also ignore the zoom flag from any tick that overlaps a zoom command (count zoom commands in flight and bump the epoch again when one returns).</p>
-<p><b>stdin:</b> find every <code>ESC [ &lt; b ; x ; y (M|m)</code> in the chunk. For each with <code>M</code> and <code>b = 0</code>, run <code>click(x, y)</code>. A chunk with no mouse sequence at all is a keypress: <code>zoomEpoch++</code>, <code>zoomed = false</code>, <code>focusSession(ownWindow)</code> (selecting the CLI pane unzooms the window).</p>
+<p><b>stdin:</b> find every <code>ESC [ &lt; b ; x ; y (M|m)</code> in the chunk. For each: <code>M</code> with <code>b = 0</code> is a press, <code>press(x, y)</code>; <code>M</code> with <code>b = 32</code> is motion with the button down, <code>dragTo(y)</code>; <code>m</code> with <code>b = 0</code> is the release, <code>release()</code>. A chunk with no mouse sequence at all is a keypress: drop any held row, <code>zoomEpoch++</code>, <code>zoomed = false</code>, <code>focusSession(ownWindow)</code> (selecting the CLI pane unzooms the window).</p>
+<p><b>Dragging.</b> The logic is four pure functions in <code>sidebar-core.mjs</code>; <code>sidebar.mjs</code> holds one variable, <code>drag</code> (null when no row is held). Times are milliseconds.</p>
+<ul>
+  <li><b>press(x, y)</b>: clear <code>drag</code> (redraw if there was one), then hit-test as <code>click</code> does. Any result but <code>select</code>: run <code>click(x, y)</code>. <code>select</code>: <code>drag = dragBegin(…)</code> and nothing else yet, so a row is selected on the release, not the press.</li>
+  <li><b>dragBegin({ id, y, rows, height, zoomed, now })</b> → <code>{ id, y, at: now, last: now, engaged: false, moved: false, order: ids of rows, start }</code>, where <code>start</code> is the index of the first row the view shows now.</li>
+  <li><b>layout</b>, <b>tableLayout</b>, <b>render</b> and <b>renderTable</b> take an optional <code>start</code>: when given, the first row shown is <code>min(max(start, 0), max(0, n − capacity))</code> in place of the active-row rule, so the view holds still while a row is held.</li>
+  <li><b>dragMove(drag, { y, rows, height, zoomed, now })</b> → the next drag, with <code>last = now</code>:
+    <ol>
+      <li>Not engaged yet: with <code>dy = |y − drag.y|</code>, stay unengaged and return when <code>dy &lt; 1</code>, or <code>dy &lt; 2</code> and <code>now − drag.at &lt; 250</code> (a click that slips one line is still a click). Else <code>engaged = true</code>.</li>
+      <li><code>list</code> = <b>dragRows(rows, drag)</b>: the rows in <code>drag.order</code> (ids no longer present dropped), then any row not in it.</li>
+      <li>Lay <code>list</code> out with <code>start</code>. Each shown row spans lines <code>top … top + 3</code> (normal) or its one line (table). If <code>y</code> is above the first shown row and <code>start &gt; 0</code>, <code>start −= 1</code>; else if <code>y</code> is below the last shown row and more rows follow, <code>start += 1</code>. Lay out again.</li>
+      <li><code>over</code> = the last shown row whose first line is at or above <code>y</code>, or the first shown row. If it is not the held row: <code>order = moveId(ids of list, id, over)</code> (remove the id, insert it at the index <code>over</code> had) and <code>moved = true</code>.</li>
+    </ol></li>
+  <li><b>dragEnd(drag, rows)</b> → what the release does: <code>{ kind: 'none' }</code> when there is no drag or its row is gone; <code>{ kind: 'select', id }</code> when it never moved; else with <code>order = ids of dragRows(rows, drag)</code>, <code>{ kind: 'none' }</code> when that equals the current order (dragged away and back) and otherwise <code>{ kind: 'move', args: moveArgs(order, id) }</code>. <code>moveArgs</code> is <code>move-window -d -b -s id -t &lt;the id after it in order&gt;</code>, or <code>move-window -d -a -s id -t &lt;the id before it&gt;</code> when it is last; null for a lone window.</li>
+  <li><b>dragView(rows, drag, now)</b> → what <code>draw</code> renders: <code>{ rows: dragRows(rows, drag), dragging: drag.id, start: drag.start }</code> while the drag is engaged and <code>now − drag.last ≤ 5000</code>, else <code>{ rows, dragging: null, start: null }</code>. tmux sends a release to the pane under the pointer, so a drag that ends outside the sidebar gets no release; it stops being drawn after 5 s and the next press clears it. A release that does arrive later still acts.</li>
+  <li><b>dragTo(y)</b> (motion): when a row is held, <code>drag = dragMove(…)</code> and draw.</li>
+  <li><b>release()</b>: take <code>drag</code> and clear it. <code>select</code>: <b>select(id)</b> = clear confirm; <code>setZoom(false)</code>; <code>select-window -t id</code>; <code>focusSession(id)</code>; tick; draw. <code>move</code>: clear confirm and run one tmux command: the <code>args</code>, then <code>; move-window -r -t =band:</code>, then <code>; select-window -t &lt;the window that was active&gt;</code>; then, when not zoomed, <code>focusSession(ownWindow)</code>; tick. Draw in every case.</li>
+  <li><b>In tick</b>, before the draw: clear <code>drag</code> when its row is gone.</li>
+</ul>
+<p class="note">Probed on tmux 3.8: a pane that asked for mouse events gets the drag (<code>MouseDrag1Pane</code> runs <code>send -M</code>); <code>move-window -a/-b</code> leaves a gap in the indexes, and <code>new-window</code> fills the lowest gap, so without <code>move-window -r</code> the next session would appear mid-list; the current window is an index, so after a move it can name another window, hence the <code>select-window</code>.</p>
 <p><b>click(x, y):</b> hit-test with <code>hitTable</code> when zoomed, else <code>hit</code>. Then:</p>
 <div class="scroll"><table>
 <tr><th>Result</th><th>Action</th></tr>
 <tr><td>expand</td><td>clear confirm; <code>setZoom(true)</code></td></tr>
 <tr><td>collapse</td><td>clear confirm; <code>setZoom(false)</code>; <code>focusSession(ownWindow)</code></td></tr>
-<tr><td>select</td><td>clear confirm; <code>setZoom(false)</code>; <code>select-window -t &lt;id&gt;</code>; <code>focusSession(id)</code></td></tr>
 <tr><td>close, and the row needs confirm</td><td><code>confirm = id</code></td></tr>
 <tr><td>close (no confirm needed) or yes</td><td>clear confirm; <b>closeWindow(id)</b></td></tr>
 <tr><td>no</td><td>clear confirm</td></tr>
 <tr><td>new, and no new window is already opening</td><td>clear confirm; <b>newWindow()</b></td></tr>
 </table></div>
 <p><b>newWindow()</b>: read <code>#{pane_current_path}</code> of <code>&lt;ownWindow&gt;.1</code>. <code>new-window -t =band: -n terminal [-c &lt;dir&gt;] -P -F '#{window_id} #{pane_id}'</code>, without <code>-d</code> so it becomes the current window; skip <code>-c</code> when the folder is empty, contains <code>#</code> or ends in <code>;</code>, as <code>band-new</code> does (section 5). Parse <code>@N %M</code>; on no match return. <code>set-option -w -t @N @band_since &lt;epoch seconds&gt;</code>. <code>split-window -d -hb -l 30 -t %M &lt;node&gt; &lt;this script&gt; &lt;tmux bin&gt; &lt;socket&gt;</code> (<code>process.execPath</code> and <code>process.argv[1]</code>); if it fails, <code>kill-window -t @N</code>. Nothing is typed: pane 1 is the server's default shell, left at its prompt. A press that arrives while a <code>newWindow()</code> is running is ignored, so a double-click opens one window. A CLI started in that shell later is picked up by the hooks like any other, since they key on <code>$TMUX_PANE</code>'s window; the shell window writes no restore record until a CLI's SessionStart runs.</p>
-<p>After it, when not zoomed and the result was not select, collapse or new, <code>focusSession(ownWindow)</code>. Then await a tick and draw. <b>closeWindow(id)</b> = read <code>show-options -wqv -t id @band_session</code>; when it matches <code>^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$</code> delete <code>B/state/sessions/&lt;uuid&gt;</code> (find <code>B</code> from <code>dirname(socket)/..</code>); then <code>kill-window -t id</code>. Deleting the record first keeps a closed session out of a later restore even if its SessionEnd hook never runs.</p>
+<p>A <code>select</code> hit never reaches <code>click</code>: <code>press</code> takes it. After the action, when not zoomed and the result was not collapse or new, <code>focusSession(ownWindow)</code>. Then await a tick and draw. <b>closeWindow(id)</b> = read <code>show-options -wqv -t id @band_session</code>; when it matches <code>^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$</code> delete <code>B/state/sessions/&lt;uuid&gt;</code> (find <code>B</code> from <code>dirname(socket)/..</code>); then <code>kill-window -t id</code>. Deleting the record first keeps a closed session out of a later restore even if its SessionEnd hook never runs.</p>
 
 <h3>7.7 PR poller (inside each sidebar, for its own window)</h3>
 <ul>
@@ -630,7 +653,8 @@ done
   <li>Click rows to switch; the sidebar stays 30 columns after resizing the terminal and switching windows.</li>
   <li>✕ on a done row closes it at once; on a working row asks yes/no first.</li>
   <li>Click <code>+ new session</code>: a window named <code>terminal</code> opens and takes focus, with the sidebar on the left and a shell prompt in the clicked window's folder; every sidebar lists it. A double-click opens one. Start <code>claude</code> there: the row picks up its state.</li>
-  <li>⤢ opens the table sorted needs-input first; resizing the terminal keeps it open; any key or ⤡ collapses; clicking a row collapses and switches.</li>
+  <li>⤢ opens the table in the sidebar's order; resizing the terminal keeps it open; any key or ⤡ collapses; clicking a row collapses and switches.</li>
+  <li>Drag the first row below the third: while held it shows <code>↕</code> and the list previews the order; hold still for 10 s and release, and it still moves; on release every sidebar shows the new order, the window you were in is still current, and the next <code>band-new</code> lands last. The same drag works in the table. A press and release without moving switches to the row.</li>
   <li><code>cd</code> into another repo or worktree inside a session: the repo line updates within 5 s.</li>
   <li>Put another app in front, run <code>band-attach</code>: the existing iTerm window comes forward on the band tab; no second window opens.</li>
   <li>Close the terminal window, run <code>band-attach</code>: one window opens attached, every session still there with its state.</li>
@@ -641,7 +665,7 @@ done
 </ol>
 
 <h2>Appendix A. Sidebar test vectors</h2>
-<p>Each case names its call: which function, which of the fixed rows (by index), width, height, confirm. The fixed rows (as <code>parseWindows</code> returns them), <code>now</code> and every case with its inputs (<code>view</code>, <code>rows</code>, <code>width</code>, <code>height</code>, <code>confirm</code>) are in the JSON block below (<code>&lt;script type="application/json" id="test-vectors"&gt;</code> in this page's source), with each case's expected output as plain text (<code>text</code>, escapes stripped) and as the exact string (<code>raw</code>, one entry per line). The text form, between <code>|</code> bars:</p>
+<p>Each case names its call: which function, which of the fixed rows (by index), width, height, confirm, and <code>dragging</code> when a row is held. The fixed rows (as <code>parseWindows</code> returns them), <code>now</code> and every case with its inputs (<code>view</code>, <code>rows</code>, <code>width</code>, <code>height</code>, <code>confirm</code>, and <code>dragging</code> where set) are in the JSON block below (<code>&lt;script type="application/json" id="test-vectors"&gt;</code> in this page's source), with each case's expected output as plain text (<code>text</code>, escapes stripped) and as the exact string (<code>raw</code>, one entry per line). The text form, between <code>|</code> bars:</p>
 <!--VECTORS_HTML-->
 <script type="application/json" id="test-vectors"><!--VECTORS_JSON--></script>
 </main>
@@ -651,7 +675,6 @@ done
   const W = 30, RW = 54, H = 17, TW = W + 1 + RW;
   const C = { w: '#d0d0d0', hi: '#ffffff', d: '#808080', o: '#ffaf00', g: '#5faf5f', b: '#5fafff', r: '#ff5f5f', m: '#af87ff', line: '#444444', act: '#3a3a3a' };
   const LOOK = { input: ['●', C.o, 'needs input'], working: ['◌', C.b, 'working'], done: ['✓', C.g, 'done'], seen: ['✓', C.d, ''], '': ['·', C.d, ''] };
-  const RANK = { input: 0, working: 1, '': 1, done: 2, seen: 3 };
   const PANES = {
     aWorking: [['> fix the login redirect after SSO'], [''], ['● Read src/auth/callback.ts'], ['● Update src/auth/callback.ts'], ['  ⎿ +12 -4', C.d], [''], ['✻ Working… (esc to interrupt)', C.o]],
     aDone: [['> fix the login redirect after SSO'], [''], ['● Update src/auth/callback.ts'], ['  ⎿ +12 -4', C.d], ['● Bash(gh pr create)'], ['  ⎿ https://github.com/acme/web-app/pull/412', C.d], [''], ['● Opened #412. The callback keeps the return URL.'], [''], ['> ', C.hi]],
@@ -710,8 +733,7 @@ done
     const sum = ` band   ${rows.length} sessions, ${n} need${n === 1 ? 's' : ''} input`;
     const L = [[seg(fit(sum, TW - 11), C.hi, null, 1), seg('⤡ collapse ', C.d)], [seg(' '.repeat(TW))],
       [seg(fit(' ' + fit('STATE', 19) + fit('SESSION', 17) + fit('REPO · BRANCH', 20) + fit('PR · CI', 14) + 'WAITING ON', TW), C.d)]];
-    const sorted = rows.map((r, i) => [r, i]).sort((a, b) => RANK[a[0].state] - RANK[b[0].state] || a[1] - b[1]).map((x) => x[0]);
-    for (const r of sorted) {
+    for (const r of rows) {
       const [mark, col] = LOOK[r.state];
       const on = r.id === active;
       const bg = on ? C.act : null;
@@ -768,7 +790,7 @@ done
     [4700, () => { click(); Object.assign(row(2), { state: 'working', age: 'now', wait: '', pane: PANES.bWorking }); say('Answer its permission prompt; the row turns blue.'); }],
     [6300, () => { Object.assign(row(1), { state: 'done', age: 'now', pr: ['#412 ◌', C.b, '#412 running'], pane: PANES.aDone }); say('Another session finishes and opens a PR; its CI shows on the row.'); }],
     [7800, () => at(29.5, 1)],
-    [8600, () => { click(); zoom = true; say('⤢ expands the list into a table, needs input first.'); }],
+    [8600, () => { click(); zoom = true; say('⤢ expands the list into a table, in the same order.'); }],
     [10400, () => at(26, 5)],
     [11200, () => { click(); zoom = false; active = 1; say('Click a row to jump to it. Looking at a done session greys it.'); }],
     [12200, () => { row(1).state = 'seen'; row(1).pr = ['#412 ✓', C.g, '#412 passing']; }],

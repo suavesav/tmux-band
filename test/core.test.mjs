@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import {
-  parseWindows, render, renderTable, layout, newLine, tableLayout, tableRows, hit, hitTable,
+  parseWindows, render, renderTable, layout, newLine, tableLayout, moveId, moveArgs, dragBegin, dragMove, dragEnd, dragView, dragRows, DRAG_STALE_MS, hit, hitTable,
   needsConfirm, age, repoLabel, fit, textWidth, optionValue, parsePrs, prValue, prBadge, prCell,
 } from '../sidebar-core.mjs';
 
@@ -14,7 +14,7 @@ const ALL = pick(0, 1, 2, 3, 4, 5);
 for (const c of vectors.cases) {
   test(`vector: ${c.name}`, () => {
     const draw = c.view === 'table' ? renderTable : render;
-    const out = draw({ rows: pick(...c.rows), width: c.width, height: c.height, confirm: c.confirm, now: vectors.now });
+    const out = draw({ rows: pick(...c.rows), width: c.width, height: c.height, confirm: c.confirm, now: vectors.now, dragging: c.dragging ?? null });
     assert.deepEqual(out.split('\n'), c.raw);
     assert.deepEqual(strip(out).split('\n'), c.text);
   });
@@ -145,21 +145,124 @@ test('newLine is the line the new-session text is drawn on', () => {
   }
 });
 
-test('tableRows sorts by state, then waiting time for input rows', () => {
-  assert.deepEqual(tableRows(ALL).map((r) => r.id), ['@1', '@2', '@3', '@6', '@4', '@5']);
+test('the table keeps the window order, whatever the states', () => {
   const rows = [
     { id: '@1', state: 'seen', since: 5 }, { id: '@2', state: 'input', since: 0 }, { id: '@3', state: 'done', since: 9 },
-    { id: '@4', state: 'input', since: 50 }, { id: '@5', state: 'weird', since: 1 }, { id: '@6', state: 'input', since: 20 },
-    { id: '@7', state: 'working', since: 99 }, { id: '@8', state: '', since: 3 }, { id: '@9', state: 'input', since: 20 },
+    { id: '@4', state: 'input', since: 50 }, { id: '@5', state: 'working', since: 1 },
   ];
-  assert.deepEqual(tableRows(rows).map((r) => r.id), ['@6', '@9', '@4', '@2', '@5', '@7', '@8', '@3', '@1']);
-  assert.equal(rows[0].id, '@1');
+  assert.deepEqual(tableLayout({ rows, height: 40 }).map((l) => l.row.id), ['@1', '@2', '@3', '@4', '@5']);
+});
+
+test('moveId puts a row where another is; moveArgs names the tmux move for it', () => {
+  const ids = ['@1', '@2', '@3', '@4'];
+  assert.deepEqual(moveId(ids, '@1', '@3'), ['@2', '@3', '@1', '@4']);
+  assert.deepEqual(moveId(ids, '@4', '@2'), ['@1', '@4', '@2', '@3']);
+  assert.equal(moveId(ids, '@2', '@2'), ids);
+  assert.equal(moveId(ids, '@9', '@2'), ids);
+  assert.deepEqual(moveArgs(['@2', '@3', '@1', '@4'], '@1'), ['move-window', '-d', '-b', '-s', '@1', '-t', '@4']);
+  assert.deepEqual(moveArgs(['@2', '@3', '@1'], '@1'), ['move-window', '-d', '-a', '-s', '@1', '-t', '@3']);
+  assert.equal(moveArgs(['@1'], '@1'), null);
+  assert.equal(moveArgs(ids, '@9'), null);
+});
+
+const mk = (over) => ({ id: '@0', active: false, state: '', tag: '', since: 0, wait: '', model: '', repo: '', pr: '', name: '', ...over });
+const SIX = Array.from({ length: 6 }, (_, i) => mk({ id: `@${i + 1}`, active: i === 1, name: `w${i + 1}` }));
+const ids = (rows) => rows.map((r) => r.id);
+// A press on `id` at line y at time 0, then one move per [y, ms].
+function dragged(id, y, moves, opts = {}) {
+  const base = { rows: SIX, height: 40, zoomed: false, ...opts };
+  let drag = dragBegin({ id, y, now: 0, ...base });
+  for (const [to, now] of moves) drag = dragMove(drag, { y: to, now, ...base });
+  return drag;
+}
+
+test('a press and release without moving selects the row; a quick one-line slip still does', () => {
+  assert.deepEqual(dragEnd(dragged('@1', 4, []), SIX), { kind: 'select', id: '@1' });
+  const slip = dragged('@1', 5, [[6, 80]], { zoomed: true });
+  assert.equal(slip.engaged, false);
+  assert.deepEqual(dragEnd(slip, SIX), { kind: 'select', id: '@1' });
+  assert.equal(dragView(SIX, slip, 100).dragging, null, 'a click never draws the held look');
+});
+
+test('a slow one-line move or any two-line move starts the drag', () => {
+  assert.equal(dragged('@2', 5, [[6, 400]], { zoomed: true }).engaged, true);
+  assert.equal(dragged('@2', 5, [[7, 50]], { zoomed: true }).engaged, true);
+});
+
+test('the held row takes the place of the row under the pointer, in both views', () => {
+  const down = dragged('@1', 4, [[8, 300], [12, 400]]);
+  assert.deepEqual(down.order, ['@2', '@3', '@1', '@4', '@5', '@6']);
+  assert.deepEqual(dragEnd(down, SIX), { kind: 'move', args: ['move-window', '-d', '-b', '-s', '@1', '-t', '@4'] });
+  const up = dragged('@6', 9, [[4, 300]], { zoomed: true });
+  assert.deepEqual(up.order, ['@6', '@1', '@2', '@3', '@4', '@5']);
+  const last = dragged('@1', 4, [[9, 300]], { zoomed: true });
+  assert.deepEqual(dragEnd(last, SIX), { kind: 'move', args: ['move-window', '-d', '-a', '-s', '@1', '-t', '@6'] });
+});
+
+test('dragging a row away and back cancels: no move and no select', () => {
+  const back = dragged('@1', 4, [[8, 300], [4, 400]]);
+  assert.deepEqual(back.order, ids(SIX));
+  assert.deepEqual(dragEnd(back, SIX), { kind: 'none' });
+});
+
+test('a drag survives rows changing under it, and ends as nothing when its row is gone', () => {
+  const drag = dragged('@1', 4, [[12, 300]]);
+  const fewer = SIX.filter((r) => r.id !== '@3');
+  const more = [...SIX, mk({ id: '@9', name: 'new' })];
+  assert.deepEqual(ids(dragRows(fewer, drag)), ['@2', '@1', '@4', '@5', '@6']);
+  assert.deepEqual(ids(dragRows(more, drag)), ['@2', '@3', '@1', '@4', '@5', '@6', '@9']);
+  assert.deepEqual(dragEnd(drag, fewer), { kind: 'move', args: ['move-window', '-d', '-b', '-s', '@1', '-t', '@4'] });
+  assert.deepEqual(dragEnd(drag, SIX.filter((r) => r.id !== '@1')), { kind: 'none' });
+  assert.deepEqual(dragEnd(null, SIX), { kind: 'none' });
+});
+
+test('the view holds still during a drag and scrolls one row past either end', () => {
+  const many = Array.from({ length: 10 }, (_, i) => mk({ id: `@${i}`, active: i === 6, name: `w${i}` }));
+  const opts = { rows: many, height: 24, zoomed: false };
+  assert.deepEqual(layout({ rows: many, height: 24 }).map((s) => s.row.id), ['@2', '@3', '@4', '@5', '@6']);
+  let drag = dragBegin({ id: '@6', y: 20, now: 0, ...opts });
+  assert.equal(drag.start, 2);
+  drag = dragMove(drag, { y: 8, now: 300, ...opts });
+  const view = dragView(many, drag, 300);
+  assert.deepEqual(layout({ rows: view.rows, height: 24, start: view.start }).map((s) => s.row.id), ['@2', '@6', '@3', '@4', '@5'],
+    'the active row moved up and the view did not follow it');
+  drag = dragMove(drag, { y: 1, now: 400, ...opts });
+  assert.equal(drag.start, 1);
+  assert.deepEqual(drag.order.slice(0, 3), ['@0', '@6', '@1']);
+  drag = dragMove(drag, { y: 1, now: 500, ...opts });
+  assert.equal(drag.start, 0);
+  assert.equal(drag.order[0], '@6');
+  drag = dragMove(drag, { y: 1, now: 600, ...opts });
+  assert.equal(drag.start, 0);
+  let down = dragBegin({ id: '@2', y: 4, now: 0, ...opts });
+  down = dragMove(down, { y: 24, now: 300, ...opts });
+  assert.equal(down.start, 3);
+  assert.equal(down.order.indexOf('@2'), 7);
+});
+
+test('a drag with no mouse event for DRAG_STALE_MS is drawn as not held, and its release still acts', () => {
+  const drag = dragged('@1', 4, [[12, 300]]);
+  assert.equal(dragView(SIX, drag, 300 + DRAG_STALE_MS).dragging, '@1');
+  const stale = dragView(SIX, drag, 301 + DRAG_STALE_MS);
+  assert.deepEqual([stale.dragging, stale.start, stale.rows], [null, null, SIX]);
+  assert.equal(dragEnd(drag, SIX).kind, 'move');
+  assert.equal(dragView(SIX, dragMove(drag, { y: 12, rows: SIX, height: 40, now: 60_000 }), 60_000).dragging, '@1');
+  assert.deepEqual(dragView(SIX, null, 0), { rows: SIX, dragging: null, start: null });
+});
+
+test('a held row changes only its mark and background', () => {
+  const opts = { rows: pick(0, 1, 2), width: 30, height: 24, now: vectors.now };
+  assert.equal(render({ ...opts, dragging: null }), render(opts));
+  const plain = render(opts).split('\n');
+  const held = render({ ...opts, dragging: '@1' }).split('\n');
+  assert.deepEqual(held.map((l, i) => l !== plain[i]).flatMap((d, i) => (d ? [i] : [])), [3, 4, 5]);
+  assert.ok(held[3].startsWith('\x1b[48;5;239m \x1b[38;5;75m↕\x1b[39m '), JSON.stringify(held[3]));
 });
 
 test('tableLayout', () => {
-  assert.deepEqual(tableLayout({ rows: ALL, height: 12 }).map((l) => [l.row.id, l.y]), [['@1', 4], ['@2', 5], ['@3', 6], ['@6', 7], ['@4', 8], ['@5', 9]]);
+  assert.deepEqual(tableLayout({ rows: ALL, height: 12 }).map((l) => [l.row.id, l.y]), [['@1', 4], ['@2', 5], ['@3', 6], ['@4', 7], ['@5', 8], ['@6', 9]]);
   assert.deepEqual(tableLayout({ rows: ALL, height: 5 }).map((l) => [l.row.id, l.y]), [['@1', 4], ['@2', 5]]);
-  assert.deepEqual(tableLayout({ rows: pick(0, 2, 3, 4, 6), height: 5 }).map((l) => [l.row.id, l.y]), [['@4', 4], ['@7', 5]]);
+  assert.deepEqual(tableLayout({ rows: pick(0, 2, 3, 4, 6), height: 5 }).map((l) => [l.row.id, l.y]), [['@5', 4], ['@7', 5]]);
   assert.deepEqual(tableLayout({ rows: ALL, height: 3 }), []);
 });
 
@@ -229,15 +332,15 @@ test('hitTable', () => {
   assert.deepEqual(at(50, 2), { kind: 'none', id: null });
   assert.deepEqual(at(50, 3), { kind: 'none', id: null });
   assert.deepEqual(at(50, 4), { kind: 'select', id: '@1' });
-  assert.deepEqual(at(50, 7), { kind: 'select', id: '@6' });
-  assert.deepEqual(at(97, 8), { kind: 'select', id: '@4' });
-  assert.deepEqual(at(98, 8), { kind: 'close', id: '@4' });
-  assert.deepEqual(at(100, 9), { kind: 'close', id: '@5' });
+  assert.deepEqual(at(50, 9), { kind: 'select', id: '@6' });
+  assert.deepEqual(at(97, 7), { kind: 'select', id: '@4' });
+  assert.deepEqual(at(98, 7), { kind: 'close', id: '@4' });
+  assert.deepEqual(at(100, 8), { kind: 'close', id: '@5' });
   assert.deepEqual(at(50, 10), { kind: 'none', id: null });
-  assert.deepEqual(at(11, 8, '@4'), { kind: 'yes', id: '@4' });
-  assert.deepEqual(at(16, 8, '@4'), { kind: 'no', id: '@4' });
-  assert.deepEqual(at(99, 8, '@4'), { kind: 'none', id: null });
-  assert.deepEqual(at(11, 9, '@4'), { kind: 'select', id: '@5' });
+  assert.deepEqual(at(11, 7, '@4'), { kind: 'yes', id: '@4' });
+  assert.deepEqual(at(16, 7, '@4'), { kind: 'no', id: '@4' });
+  assert.deepEqual(at(99, 7, '@4'), { kind: 'none', id: null });
+  assert.deepEqual(at(11, 8, '@4'), { kind: 'select', id: '@5' });
   assert.deepEqual(at(1, 12), { kind: 'none', id: null });
   assert.deepEqual(hitTable({ x: 14, y: 24, rows: ALL, width: 30, height: 24, confirm: null }), { kind: 'none', id: null });
 });

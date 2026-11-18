@@ -66,7 +66,7 @@ const FRAMES = [
     rows: [s1({ state: 'working', since: NOW - 140 }), s2({ active: true, state: 'working', since: NOW - 2 }), s3()], pane: PANES.run },
   { seconds: 3, caption: 'A session opens a pull request: its CI shows up on the row.',
     rows: [s1({ state: 'done', since: NOW - 3, pr: '412:o:r' }), s2({ active: true, state: 'working', since: NOW - 40 }), s3()], pane: PANES.run },
-  { seconds: 3.6, caption: '⤢ expands the list into a table, whoever is waiting on top.', table: true,
+  { seconds: 3.6, caption: '⤢ expands the list into a table. Drag rows to reorder, here or in the sidebar.', table: true,
     rows: [s1({ state: 'done', since: NOW - 30, pr: '412:o:p' }), s2({ active: true, state: 'input', since: NOW - 4, wait: 'plan approval' }), s3()] },
   { seconds: 2.8, caption: 'Looked at a finished session? It turns grey.', click: [12, 4],
     rows: [s1({ active: true, state: 'seen', since: NOW - 40, pr: '412:o:p' }), s2({ state: 'input', since: NOW - 14, wait: 'plan approval' }), s3()], pane: PANES.loginDone },

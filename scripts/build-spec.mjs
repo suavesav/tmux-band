@@ -31,6 +31,9 @@ const cases = [
   { name: "normal 19x8 (badge dropped: 19 − 6 − 2 = 11)", view: "normal", width: 19, height: 8, confirm: null, rows: [1] },
   { name: "normal 30x6, no sessions (new-session line only)", view: "normal", width: 30, height: 6, confirm: null, rows: [] },
   { name: "normal 30x13 (one row fewer: 2 lines kept for new session)", view: "normal", width: 30, height: 13, confirm: null, rows: [0, 2, 3] },
+  { name: "normal 30x24, row @3 held (being dragged)", view: "normal", width: 30, height: 24, confirm: null, dragging: "@3", rows: [0, 1, 2, 3, 4, 5] },
+  { name: "normal 30x12, the active row held", view: "normal", width: 30, height: 12, confirm: null, dragging: "@2", rows: [0, 1] },
+  { name: "table 100x12, row @4 held", view: "table", width: 100, height: 12, confirm: null, dragging: "@4", rows: [0, 1, 2, 3, 4, 5] },
   { name: "normal 8x2 (header with ⤢)", view: "normal", width: 8, height: 2, confirm: null, rows: [6] },
   { name: "normal 7x2 (header without ⤢)", view: "normal", width: 7, height: 2, confirm: null, rows: [6] },
   { name: "table 120x6, one session", view: "table", width: 120, height: 6, confirm: null, rows: [6] },
@@ -41,7 +44,7 @@ const cases = [
 ];
 const vectors = { now: NOW, rows, cases: cases.map((c) => {
   const fn = c.view === 'table' ? renderTable : render;
-  const raw = fn({ rows: c.rows.map((i) => rows[i]), width: c.width, height: c.height, confirm: c.confirm, now: NOW });
+  const raw = fn({ rows: c.rows.map((i) => rows[i]), width: c.width, height: c.height, confirm: c.confirm, now: NOW, dragging: c.dragging ?? null });
   return { ...c, text: strip(raw).split('\n'), raw: raw.split('\n') };
 }) };
 fs.writeFileSync(path.join(root, 'test/vectors.json'), JSON.stringify(vectors, null, 1));
@@ -49,7 +52,7 @@ fs.writeFileSync(path.join(root, 'test/vectors.json'), JSON.stringify(vectors, n
 const esc = (s) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 const html = vectors.cases.map((c) => {
   const fn = c.view === 'table' ? 'renderTable' : 'render';
-  const call = `${fn}({ rows: rows[${c.rows.join(', ')}], width: ${c.width}, height: ${c.height}, confirm: ${c.confirm === null ? 'null' : JSON.stringify(c.confirm)}, now })`;
+  const call = `${fn}({ rows: rows[${c.rows.join(', ')}], width: ${c.width}, height: ${c.height}, confirm: ${c.confirm === null ? 'null' : JSON.stringify(c.confirm)}, now${c.dragging ? `, dragging: ${JSON.stringify(c.dragging)}` : ''} })`;
   return `<h3>${esc(c.name)}</h3>\n<p class="note"><code>${esc(call)}</code></p>\n<div class="scroll"><pre>${c.text.map((l) => esc(`|${l}|`)).join('\n')}</pre></div>`;
 }).join('\n');
 const out = fs.readFileSync(path.join(root, 'spec/spec.src.html'), 'utf8')

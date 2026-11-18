@@ -3,6 +3,8 @@
 const ESC = '\x1b';
 const RESET = `${ESC}[0m`;
 const ACTIVE_BG = `${ESC}[48;5;237m`;
+const DRAG_BG = `${ESC}[48;5;239m`;
+const DRAG_LOOK = { mark: '↕', color: 75 };
 const DIM = 244;
 
 export const SIDEBAR_WIDTH = 30;
@@ -199,36 +201,41 @@ export function prCell(prs) {
 
 // ---- normal view ----
 
-function windowStart(rows, capacity) {
-  const n = rows.length;
-  if (n <= capacity) return 0;
+// The index of the first row shown: `start` when given (a drag holds the
+// view still), else the one that keeps the active row in view.
+function windowStart(rows, capacity, start = null) {
+  const last = Math.max(0, rows.length - capacity);
+  if (start !== null && start !== undefined) return Math.max(0, Math.min(start, last));
+  if (rows.length <= capacity) return 0;
   const activeAt = Math.max(0, rows.findIndex((r) => r.active));
-  return Math.max(0, Math.min(activeAt - capacity + 1, n - capacity));
+  return Math.max(0, Math.min(activeAt - capacity + 1, last));
 }
 
-export function layout({ rows, height }) {
+export function layout({ rows, height, start = null }) {
   const capacity = Math.max(0, Math.floor((height - HEADER_LINES - NEW_LINES) / ROW_LINES));
-  const start = windowStart(rows, capacity);
-  return rows.slice(start, start + capacity).map((row, i) => ({ row, top: HEADER_LINES + 1 + ROW_LINES * i }));
+  const first = windowStart(rows, capacity, start);
+  return rows.slice(first, first + capacity).map((row, i) => ({ row, top: HEADER_LINES + 1 + ROW_LINES * i }));
 }
 
 export function newLine({ rows, height }) {
   return HEADER_LINES + ROW_LINES * layout({ rows, height }).length + NEW_LINES;
 }
 
-export function render({ rows, width, height, confirm = null, now = 0 }) {
+export function render({ rows, width, height, confirm = null, now = 0, dragging = null, start = null }) {
   const lines = [];
   lines.push(width > 7 ? bold(fit(' band', width - 2)) + fg(DIM, EXPAND_TEXT) : bold(fit(' band', width)));
   const waiting = rows.filter((r) => r.state === 'input').length;
   const summary = waiting === 0 ? ' nothing waiting' : waiting === 1 ? ' 1 needs input' : ` ${waiting} need input`;
   lines.push(fg(DIM, fit(summary, width)));
-  for (const { row } of layout({ rows, height })) {
-    const { mark, color } = look(row.state);
-    const bg = row.active ? ACTIVE_BG : '';
+  for (const { row } of layout({ rows, height, start })) {
+    const { color } = look(row.state);
+    const held = dragging !== null && dragging === row.id;
+    const lead = held ? DRAG_LOOK : look(row.state);
+    const bg = held ? DRAG_BG : row.active ? ACTIVE_BG : '';
     lines.push(fit('', width));
     if (width > 6) {
       const name = fit(row.name, width - 6);
-      lines.push(`${bg} ${fg(color, mark)} ${row.active ? bold(name) : name}${fg(DIM, CLOSE_TEXT)}${RESET}`);
+      lines.push(`${bg} ${fg(lead.color, lead.mark)} ${row.active ? bold(name) : name}${fg(DIM, CLOSE_TEXT)}${RESET}`);
     } else {
       lines.push(bg + fit('', width) + RESET);
     }
@@ -272,27 +279,10 @@ export function hit({ x, y, rows, width, height, confirm = null }) {
 
 // ---- table view ----
 
-export function tableRows(rows) {
-  const rank = (state) => ({ input: 0, working: 1, done: 2, seen: 3 })[state] ?? 1;
-  const key = (r) => (r.state === 'input' ? r.since || Infinity : 0);
-  return rows
-    .map((row, i) => ({ row, i }))
-    .sort((a, b) => {
-      const byRank = rank(a.row.state) - rank(b.row.state);
-      if (byRank) return byRank;
-      const ka = key(a.row);
-      const kb = key(b.row);
-      if (ka !== kb) return ka < kb ? -1 : 1;
-      return a.i - b.i;
-    })
-    .map(({ row }) => row);
-}
-
-export function tableLayout({ rows, height }) {
-  const sorted = tableRows(rows);
+export function tableLayout({ rows, height, start = null }) {
   const capacity = Math.max(0, height - TABLE_HEADER_LINES);
-  const start = windowStart(sorted, capacity);
-  return sorted.slice(start, start + capacity).map((row, i) => ({ row, y: TABLE_HEADER_LINES + 1 + i }));
+  const first = windowStart(rows, capacity, start);
+  return rows.slice(first, first + capacity).map((row, i) => ({ row, y: TABLE_HEADER_LINES + 1 + i }));
 }
 
 function tableColumns(width) {
@@ -304,11 +294,14 @@ function tableColumns(width) {
   return cols;
 }
 
-function tableCell(col, row, now) {
+function tableCell(col, row, now, held) {
   const { mark, color } = look(row.state);
   const w = col.width;
   switch (col.key) {
-    case 'state': return fg(color, fit(`${mark} ${stateText(row, now)}`, w));
+    case 'state':
+      return held
+        ? fg(DRAG_LOOK.color, DRAG_LOOK.mark) + fg(color, fit(` ${stateText(row, now)}`, w - 1))
+        : fg(color, fit(`${mark} ${stateText(row, now)}`, w));
     case 'session': {
       const name = fit(row.name, w - 1);
       return (row.active ? bold(name) : name) + ' ';
@@ -323,7 +316,7 @@ function tableCell(col, row, now) {
   }
 }
 
-export function renderTable({ rows, width, height, confirm = null, now = 0 }) {
+export function renderTable({ rows, width, height, confirm = null, now = 0, dragging = null, start = null }) {
   const cols = tableColumns(width);
   const sum = cols.reduce((n, c) => n + c.width, 0);
   const waiting = rows.filter((r) => r.state === 'input').length;
@@ -332,14 +325,15 @@ export function renderTable({ rows, width, height, confirm = null, now = 0 }) {
   lines.push(width > 17 ? bold(fit(summary, width - 11)) + fg(DIM, COLLAPSE_TEXT) : bold(fit(summary, width)));
   lines.push(fit('', width));
   lines.push(fg(DIM, fit(' ' + cols.map((c) => fit(c.title, c.width)).join(''), width)));
-  for (const { row } of tableLayout({ rows, height })) {
-    const bg = row.active ? ACTIVE_BG : '';
+  for (const { row } of tableLayout({ rows, height, start })) {
+    const held = dragging !== null && dragging === row.id;
+    const bg = held ? DRAG_BG : row.active ? ACTIVE_BG : '';
     if (confirm !== null && confirm === row.id) {
       lines.push(bg + fit(CONFIRM_TEXT, width) + RESET);
       continue;
     }
     const fill = ' '.repeat(Math.max(0, width - (1 + sum) - 3));
-    lines.push(`${bg} ${cols.map((c) => tableCell(c, row, now)).join('')}${fill}${fg(DIM, CLOSE_TEXT)}${RESET}`);
+    lines.push(`${bg} ${cols.map((c) => tableCell(c, row, now, held)).join('')}${fill}${fg(DIM, CLOSE_TEXT)}${RESET}`);
   }
   return lines.slice(0, Math.max(0, height)).join('\n');
 }
@@ -352,4 +346,101 @@ export function hitTable({ x, y, rows, width, height, confirm = null }) {
   if (confirm !== null && confirm === id) return confirmHit(x, id);
   if (x > width - 3) return { kind: 'close', id };
   return { kind: 'select', id };
+}
+
+// ---- dragging a row to reorder ----
+
+// A held row stops being drawn as held after this long with no mouse event:
+// tmux sends a release to the pane under the pointer, so a drag that ends
+// outside the sidebar never ends here.
+export const DRAG_STALE_MS = 5000;
+// A press that slips one line within this time is still a click.
+const DRAG_SLIP_MS = 250;
+
+// The lines of the rows shown: [{ id, from, to }].
+function spans({ rows, height, start, zoomed }) {
+  return zoomed
+    ? tableLayout({ rows, height, start }).map(({ row, y }) => ({ id: row.id, from: y, to: y }))
+    : layout({ rows, height, start }).map(({ row, top }) => ({ id: row.id, from: top, to: top + ROW_LINES - 1 }));
+}
+
+// `ids` with `id` moved to where `over` is.
+export function moveId(ids, id, over) {
+  const from = ids.indexOf(id);
+  const to = ids.indexOf(over);
+  if (from < 0 || to < 0 || from === to) return ids;
+  const out = ids.filter((v) => v !== id);
+  out.splice(to, 0, id);
+  return out;
+}
+
+// The tmux arguments that put window `id` where `order` has it; null when
+// `id` is alone or missing.
+export function moveArgs(order, id) {
+  const at = order.indexOf(id);
+  if (at < 0 || order.length < 2) return null;
+  return at < order.length - 1
+    ? ['move-window', '-d', '-b', '-s', id, '-t', order[at + 1]]
+    : ['move-window', '-d', '-a', '-s', id, '-t', order[at - 1]];
+}
+
+// `rows` in a drag's order: its ids first (gone ones dropped), then the rest.
+export function dragRows(rows, drag) {
+  if (!drag) return rows;
+  const byId = new Map(rows.map((r) => [r.id, r]));
+  return [...drag.order.map((id) => byId.get(id)).filter(Boolean), ...rows.filter((r) => !drag.order.includes(r.id))];
+}
+
+// A press on row `id` at line y. { id, order, start, y, at, last, engaged, moved }:
+// `start` is the first row shown, held for the whole drag.
+export function dragBegin({ id, y, rows, height, zoomed = false, now }) {
+  const first = spans({ rows, height, start: null, zoomed })[0];
+  return {
+    id, y, at: now, last: now, engaged: false, moved: false,
+    order: rows.map((r) => r.id),
+    start: first ? rows.findIndex((r) => r.id === first.id) : 0,
+  };
+}
+
+// The drag after the pointer moved to line y. The held row takes the place
+// of the row under the pointer; past either end of the list the view scrolls
+// one row per event.
+export function dragMove(drag, { y, rows, height, zoomed = false, now }) {
+  const next = { ...drag, last: now };
+  if (!next.engaged) {
+    const dy = Math.abs(y - drag.y);
+    if (dy < 1 || (dy < 2 && now - drag.at < DRAG_SLIP_MS)) return next;
+    next.engaged = true;
+  }
+  const list = dragRows(rows, next);
+  let shown = spans({ rows: list, height, start: next.start, zoomed });
+  if (!shown.length) return next;
+  next.start = list.findIndex((r) => r.id === shown[0].id);
+  if (y < shown[0].from && next.start > 0) next.start -= 1;
+  else if (y > shown.at(-1).to && next.start + shown.length < list.length) next.start += 1;
+  shown = spans({ rows: list, height, start: next.start, zoomed });
+  const over = (shown.filter((s) => y >= s.from).at(-1) || shown[0]).id;
+  if (over !== next.id) {
+    next.order = moveId(list.map((r) => r.id), next.id, over);
+    next.moved = true;
+  }
+  return next;
+}
+
+// What a release does: { kind: 'select', id } for a row that never moved,
+// { kind: 'move', args } with moveArgs for a new order, else { kind: 'none' }.
+export function dragEnd(drag, rows) {
+  if (!drag || !rows.some((r) => r.id === drag.id)) return { kind: 'none' };
+  if (!drag.moved) return { kind: 'select', id: drag.id };
+  const order = dragRows(rows, drag).map((r) => r.id);
+  const args = moveArgs(order, drag.id);
+  if (!args || order.every((id, i) => id === rows[i].id)) return { kind: 'none' };
+  return { kind: 'move', args };
+}
+
+// What to draw: the rows, the held id and the view's first row while a drag
+// is live, else the rows as they are.
+export function dragView(rows, drag, now) {
+  const live = drag && drag.engaged && now - drag.last <= DRAG_STALE_MS;
+  return live ? { rows: dragRows(rows, drag), dragging: drag.id, start: drag.start } : { rows, dragging: null, start: null };
 }
