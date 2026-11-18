@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import {
-  parseWindows, render, renderTable, layout, newLine, tableLayout, moveId, moveArgs, dragBegin, dragMove, dragEnd, dragView, dragRows, DRAG_STALE_MS, hit, hitTable,
+  parseWindows, render, renderTable, layout, newLine, tableLayout, moveId, moveArgs, dragBegin, dragMove, dragEnd, dragView, dragRows, dragExpired, DRAG_STALE_MS, hit, hitTable,
   needsConfirm, age, repoLabel, fit, textWidth, optionValue, parsePrs, prValue, prBadge, prCell,
 } from '../sidebar-core.mjs';
 
@@ -240,14 +240,31 @@ test('the view holds still during a drag and scrolls one row past either end', (
   assert.equal(down.order.indexOf('@2'), 7);
 });
 
-test('a drag with no mouse event for DRAG_STALE_MS is drawn as not held, and its release still acts', () => {
+test('a drag with no mouse event for DRAG_STALE_MS is over: not drawn, and expired for the tick to drop', () => {
   const drag = dragged('@1', 4, [[12, 300]]);
   assert.equal(dragView(SIX, drag, 300 + DRAG_STALE_MS).dragging, '@1');
+  assert.equal(dragExpired(drag, 300 + DRAG_STALE_MS), false);
   const stale = dragView(SIX, drag, 301 + DRAG_STALE_MS);
   assert.deepEqual([stale.dragging, stale.start, stale.rows], [null, null, SIX]);
-  assert.equal(dragEnd(drag, SIX).kind, 'move');
-  assert.equal(dragView(SIX, dragMove(drag, { y: 12, rows: SIX, height: 40, now: 60_000 }), 60_000).dragging, '@1');
+  assert.equal(dragExpired(drag, 301 + DRAG_STALE_MS), true);
+  assert.equal(dragExpired(null, 0), false);
   assert.deepEqual(dragView(SIX, null, 0), { rows: SIX, dragging: null, start: null });
+});
+
+test('the expanded list scrolls from its first and last rows, whose lines are the pane edges', () => {
+  const many = Array.from({ length: 30 }, (_, i) => mk({ id: `@${i}`, active: i === 0, name: `w${i}` }));
+  const opts = { rows: many, height: 12, zoomed: true };
+  let drag = dragBegin({ id: '@2', y: 6, now: 0, ...opts });
+  assert.equal(drag.start, 0);
+  drag = dragMove(drag, { y: 12, now: 300, ...opts });
+  assert.equal(drag.start, 1);
+  assert.equal(drag.order.indexOf('@2'), 9);
+  drag = dragMove(drag, { y: 12, now: 400, ...opts });
+  assert.equal(drag.start, 2);
+  assert.equal(drag.order.indexOf('@2'), 10);
+  drag = dragMove(drag, { y: 4, now: 500, ...opts });
+  assert.equal(drag.start, 1);
+  assert.equal(drag.order.indexOf('@2'), 1);
 });
 
 test('a held row changes only its mark and background', () => {

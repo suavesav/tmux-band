@@ -4,7 +4,7 @@ import { execFile } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import {
-  parseWindows, render, renderTable, hit, hitTable, needsConfirm, dragBegin, dragMove, dragEnd, dragView,
+  parseWindows, render, renderTable, hit, hitTable, needsConfirm, dragBegin, dragMove, dragEnd, dragView, dragExpired,
   repoLabel, optionValue, prValue, SIDEBAR_WIDTH,
 } from './sidebar-core.mjs';
 
@@ -303,7 +303,7 @@ async function tickBody() {
     mine.state = 'seen';
   }
   if (confirm !== null && !rows.some((r) => r.id === confirm)) confirm = null;
-  if (drag && !rows.some((r) => r.id === drag.id)) drag = null;
+  if (drag && (dragExpired(drag, Date.now()) || !rows.some((r) => r.id === drag.id))) drag = null;
   draw();
 }
 
@@ -404,9 +404,13 @@ async function select(id) {
 }
 
 function press(x, y) {
-  const stale = drag;
-  drag = null;
-  if (stale) draw();
+  // A press over a drag whose release never came lands on a preview that is
+  // not the real order: it only puts the list back.
+  if (drag) {
+    drag = null;
+    draw();
+    return Promise.resolve();
+  }
   const { width, height } = size();
   const result = (zoomed ? hitTable : hit)({ x, y, rows, width, height, confirm });
   if (result.kind !== 'select') return click(x, y);

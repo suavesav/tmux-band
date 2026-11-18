@@ -350,10 +350,10 @@ export function hitTable({ x, y, rows, width, height, confirm = null }) {
 
 // ---- dragging a row to reorder ----
 
-// A held row stops being drawn as held after this long with no mouse event:
 // tmux sends a release to the pane under the pointer, so a drag that ends
-// outside the sidebar never ends here.
-export const DRAG_STALE_MS = 5000;
+// outside the sidebar never ends here: one with no mouse event for this long
+// is over.
+export const DRAG_STALE_MS = 10_000;
 // A press that slips one line within this time is still a click.
 const DRAG_SLIP_MS = 250;
 
@@ -402,9 +402,6 @@ export function dragBegin({ id, y, rows, height, zoomed = false, now }) {
   };
 }
 
-// The drag after the pointer moved to line y. The held row takes the place
-// of the row under the pointer; past either end of the list the view scrolls
-// one row per event.
 export function dragMove(drag, { y, rows, height, zoomed = false, now }) {
   const next = { ...drag, last: now };
   if (!next.engaged) {
@@ -416,8 +413,10 @@ export function dragMove(drag, { y, rows, height, zoomed = false, now }) {
   let shown = spans({ rows: list, height, start: next.start, zoomed });
   if (!shown.length) return next;
   next.start = list.findIndex((r) => r.id === shown[0].id);
-  if (y < shown[0].from && next.start > 0) next.start -= 1;
-  else if (y > shown.at(-1).to && next.start + shown.length < list.length) next.start += 1;
+  // The first and last rows shown are the scroll zones: the table's last
+  // row sits on the pane's last line, so there is nothing below it to reach.
+  if (y <= shown[0].to && next.start > 0) next.start -= 1;
+  else if (y >= shown.at(-1).from && next.start + shown.length < list.length) next.start += 1;
   shown = spans({ rows: list, height, start: next.start, zoomed });
   const over = (shown.filter((s) => y >= s.from).at(-1) || shown[0]).id;
   if (over !== next.id) {
@@ -438,9 +437,11 @@ export function dragEnd(drag, rows) {
   return { kind: 'move', args };
 }
 
-// What to draw: the rows, the held id and the view's first row while a drag
-// is live, else the rows as they are.
+export function dragExpired(drag, now) {
+  return Boolean(drag) && now - drag.last > DRAG_STALE_MS;
+}
+
 export function dragView(rows, drag, now) {
-  const live = drag && drag.engaged && now - drag.last <= DRAG_STALE_MS;
+  const live = drag && drag.engaged && !dragExpired(drag, now);
   return live ? { rows: dragRows(rows, drag), dragging: drag.id, start: drag.start } : { rows, dragging: null, start: null };
 }
