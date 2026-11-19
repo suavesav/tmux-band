@@ -182,7 +182,7 @@ const opened = t;
 const four = (o) => s4({ active: true, since: NOW + opened, ...o });
 show({ rows: [...after({ plain: true }), four()], pane: PANES.shell, w: WIDE });
 wait(0.5);
-move(66, 5, 0.7);
+move(74, 10, 0.7);
 type(0, SHELL.length, 'claude', 0.11);
 wait(0.5);
 
