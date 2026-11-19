@@ -51,7 +51,7 @@ const [core, rawTitle, dir, tag, model] = process.argv.slice(1);
 const { optionValue } = await import(pathToFileURL(core).href);
 const first = rawTitle.split(/\r?\n/).find((l) => l.trim() !== "") ?? "";
 const base = dir.split("/").filter(Boolean).pop() ?? "";
-const title = optionValue(first, 40) || optionValue(base, 40) || "session";
+const title = optionValue(first, 120) || optionValue(base, 120) || "session";
 console.log(title.replaceAll("#", "##"));
 console.log(optionValue(tag, 40));
 console.log(optionValue(model, 40));

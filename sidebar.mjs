@@ -5,7 +5,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import {
   parseWindows, render, renderTable, hit, hitTable, needsConfirm, dragBegin, dragMove, dragEnd, dragView, dragExpired,
-  repoLabel, optionValue, prValue, SIDEBAR_WIDTH,
+  repoLabel, optionValue, prValue, widthStep, parseWidth, WIDTH_DEFAULT,
 } from './sidebar-core.mjs';
 
 const [TMUX_BIN, SOCK] = process.argv.slice(2);
@@ -17,6 +17,8 @@ if (!TMUX_BIN || !SOCK || !PANE) {
 
 const B = path.resolve(path.dirname(SOCK), '..');
 const LOG = path.join(B, 'state', 'sidebar.log');
+// The width outlives the tmux server here; the option does not.
+const WIDTH_FILE = path.join(B, 'state', 'sidebar-width');
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const WINDOW_ID = /^@\d+$/;
 const ESC = '\x1b';
@@ -27,7 +29,7 @@ const LIST_FORMAT = [
 ].join('\t');
 const OWN_FORMAT = [
   '#{window_id}', '#{pane_width}', '#{window_panes}', '#{session_attached}',
-  '#{window_active}', '#{window_zoomed_flag}',
+  '#{window_active}', '#{window_zoomed_flag}', '#{window_width}', '#{@band_sidebar_width}',
 ].join('\t');
 
 function findBin(name) {
@@ -68,6 +70,9 @@ let ownWindow = null;
 let ticking = false;
 let failures = 0;
 let lastResize = 0;
+// The last tick's width reading, for widthStep().
+let widthSeen = null;
+let sidebarWidth = WIDTH_DEFAULT;
 let repoTicks = 0;
 let inactiveTicks = 0;
 let lastRepo = null;
@@ -78,7 +83,7 @@ let drag = null;
 let lastDrawKey = '';
 let quitting = false;
 
-const size = () => ({ width: process.stdout.columns || SIDEBAR_WIDTH, height: process.stdout.rows || 24 });
+const size = () => ({ width: process.stdout.columns || sidebarWidth, height: process.stdout.rows || 24 });
 
 function quit() {
   if (quitting) return;
@@ -266,6 +271,42 @@ async function kickPrs() {
   }
 }
 
+// ---- width ----
+
+function savedWidth() {
+  try {
+    return fs.readFileSync(WIDTH_FILE, 'utf8');
+  } catch {
+    return null;
+  }
+}
+
+// Every window's sidebar starts at once on a new server and reads this file.
+function saveWidth(width) {
+  if (parseWidth(savedWidth()) === width) return;
+  try {
+    fs.writeFileSync(`${WIDTH_FILE}.${process.pid}`, `${width}\n`);
+    fs.renameSync(`${WIDTH_FILE}.${process.pid}`, WIDTH_FILE);
+  } catch { /* the next change tries again */ }
+}
+
+async function holdWidth(reading) {
+  const { set, resize } = widthStep(reading, widthSeen, parseWidth(reading.option) === null ? savedWidth() : null);
+  widthSeen = reading;
+  if (set !== null) {
+    await tmux(['set-option', '-g', '@band_sidebar_width', String(set)]);
+    widthSeen = { ...reading, option: String(set) };
+    saveWidth(set);
+  }
+  sidebarWidth = parseWidth(set ?? reading.option) ?? sidebarWidth;
+  if (resize !== null && Date.now() - lastResize >= 500) {
+    lastResize = Date.now();
+    await tmux(['resize-pane', '-t', PANE, '-x', String(resize)]);
+    // tmux gives the pane what fits, with no error: the next reading stands alone.
+    widthSeen = null;
+  }
+}
+
 // ---- tick ----
 
 async function tickBody() {
@@ -277,16 +318,15 @@ async function tickBody() {
     return;
   }
   failures = 0;
-  const [windowId, paneWidth, panes, attached, activeFlag, zoomFlag] = own;
+  const [windowId, paneWidth, panes, attached, activeFlag, zoomFlag, windowWidth, widthOption = ''] = own;
   ownWindow = windowId;
   if (epoch === zoomEpoch) zoomed = zoomFlag === '1';
   if (panes === '1') return quit();
   const active = activeFlag === '1';
   if (zoomed && !active) await setZoom(false);
-  if (!zoomed && Number(paneWidth) !== SIDEBAR_WIDTH && Date.now() - lastResize >= 500) {
-    lastResize = Date.now();
-    await tmux(['resize-pane', '-t', PANE, '-x', String(SIDEBAR_WIDTH)]);
-  }
+  // A reply read before a zoom or unzoom carries the other state's width.
+  if (zoomed || zoomFlag === '1') widthSeen = null;
+  else await holdWidth({ own: Number(paneWidth), option: widthOption, windowWidth: Number(windowWidth), active, panes: Number(panes) });
   if (repoTicks++ % 5 === 0) noteRepo().catch((e) => log(`repo: ${e?.stack || e}`));
   kickPrs();
   if (active) inactiveTicks = 0;
@@ -344,7 +384,7 @@ async function newWindow() {
     const m = /^(@\d+) (%\d+)$/.exec(line(made));
     if (!m) return;
     await tmux(['set-option', '-w', '-t', m[1], '@band_since', String(Math.floor(Date.now() / 1000))]);
-    const split = await tmux(['split-window', '-d', '-hb', '-l', String(SIDEBAR_WIDTH), '-t', m[2], process.execPath, process.argv[1], TMUX_BIN, SOCK]);
+    const split = await tmux(['split-window', '-d', '-hb', '-l', String(sidebarWidth), '-t', m[2], process.execPath, process.argv[1], TMUX_BIN, SOCK]);
     if (split === null) await tmux(['kill-window', '-t', m[1]]);
   } finally {
     opening = false;
@@ -477,5 +517,7 @@ process.stdin.on('end', quit);
 process.stdin.on('error', quit);
 process.stdin.resume();
 process.stdout.on('resize', draw);
+// widthStep() reads a resize by another conf's hooks as a border drag.
+tmux(['source-file', path.join(B, 'tmux.conf')]);
 setInterval(tick, 1000);
 tick();

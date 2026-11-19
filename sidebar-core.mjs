@@ -7,7 +7,6 @@ const DRAG_BG = `${ESC}[48;5;239m`;
 const DRAG_LOOK = { mark: '↕', color: 75 };
 const DIM = 244;
 
-export const SIDEBAR_WIDTH = 30;
 const HEADER_LINES = 2;
 const ROW_LINES = 4;
 const TABLE_HEADER_LINES = 3;
@@ -444,4 +443,40 @@ export function dragExpired(drag, now) {
 export function dragView(rows, drag, now) {
   const live = drag && drag.engaged && !dragExpired(drag, now);
   return live ? { rows: dragRows(rows, drag), dragging: drag.id, start: drag.start } : { rows, dragging: null, start: null };
+}
+
+// ---- the sidebar's width ----
+
+export const WIDTH_DEFAULT = 30;
+export const WIDTH_MIN = 20;
+export const WIDTH_MAX = 60;
+// Columns the session pane keeps when the terminal is narrower than the
+// width asks for.
+const SESSION_MIN = 20;
+
+// A width from an option or a file; null when it is not one.
+export function parseWidth(value) {
+  const n = /^\d{1,3}$/.test(String(value ?? '').trim()) ? Number(value) : NaN;
+  return n >= WIDTH_MIN && n <= WIDTH_MAX ? n : null;
+}
+
+// `now` and `prev` are a tick's reading { own, option, windowWidth, active,
+// panes } (prev null when there is none to trust), `saved` the width on disk.
+// Returns { set, resize }: a width for the option, one for the pane, or null.
+// tmux's border drag changes a pane's width and nothing else in a reading.
+export function widthStep(now, prev, saved = null) {
+  let option = parseWidth(now.option);
+  let set = null;
+  if (option === null) {
+    option = parseWidth(saved) ?? WIDTH_DEFAULT;
+    set = option;
+  } else if (now.active && now.panes === 2 && prev && prev.active && prev.panes === 2
+    && prev.own !== now.own && prev.windowWidth === now.windowWidth && parseWidth(prev.option) === option) {
+    const width = Math.max(WIDTH_MIN, Math.min(WIDTH_MAX, now.own));
+    if (width !== option) set = width;
+    option = width;
+  }
+  const room = Number.isFinite(now.windowWidth) ? now.windowWidth - SESSION_MIN - 1 : option;
+  const target = Math.max(1, Math.min(option, room));
+  return { set, resize: now.own === target ? null : target };
 }

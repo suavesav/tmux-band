@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import {
-  parseWindows, render, renderTable, layout, newLine, tableLayout, moveId, moveArgs, dragBegin, dragMove, dragEnd, dragView, dragRows, dragExpired, DRAG_STALE_MS, hit, hitTable,
+  parseWindows, render, renderTable, layout, newLine, tableLayout, moveId, moveArgs, dragBegin, dragMove, dragEnd, dragView, dragRows, dragExpired, DRAG_STALE_MS, widthStep, parseWidth, WIDTH_DEFAULT, WIDTH_MIN, WIDTH_MAX, hit, hitTable,
   needsConfirm, age, repoLabel, fit, textWidth, optionValue, parsePrs, prValue, prBadge, prCell,
 } from '../sidebar-core.mjs';
 
@@ -377,4 +377,67 @@ test('parseWindows', () => {
     { id: '@3', active: false, state: 'done', tag: 'tag', since: 0, wait: '', model: '', repo: '', pr: '', name: 'bell' },
   ]);
   assert.deepEqual(parseWindows(''), []);
+});
+
+// ---- the sidebar's width ----
+
+test('parseWidth admits whole numbers from WIDTH_MIN to WIDTH_MAX', () => {
+  assert.deepEqual(['30', '20', '60', ' 45\n', 45].map(parseWidth), [30, 20, 60, 45, 45]);
+  assert.deepEqual(['', '19', '61', '30.5', 'abc', '-30', null, undefined, '1e1'].map(parseWidth), Array(9).fill(null));
+  assert.deepEqual([WIDTH_DEFAULT, WIDTH_MIN, WIDTH_MAX], [30, 20, 60]);
+});
+
+const STEADY = { own: 30, option: '30', windowWidth: 150, active: true, panes: 2 };
+
+test('widthStep: an unset option takes the saved width, else the default', () => {
+  const now = { ...STEADY, option: '' };
+  assert.deepEqual(widthStep(now, null, '45\n'), { set: 45, resize: 45 });
+  assert.deepEqual(widthStep(now, null, null), { set: 30, resize: null });
+  assert.deepEqual(widthStep(now, null, '999'), { set: 30, resize: null });
+  assert.deepEqual(widthStep({ ...now, option: 'junk', own: 80 }, null, null), { set: 30, resize: 30 });
+});
+
+test('widthStep: a pane dragged by its border sets the option, clamped', () => {
+  const drag = (own) => widthStep({ ...STEADY, own }, STEADY);
+  assert.deepEqual(drag(30), { set: null, resize: null });
+  assert.deepEqual(drag(45), { set: 45, resize: null });
+  assert.deepEqual(drag(90), { set: 60, resize: 60 });
+  assert.deepEqual(drag(5), { set: 20, resize: 20 });
+});
+
+test('widthStep: any other difference goes back to the option', () => {
+  const back = { set: null, resize: 30 };
+  const moved = { ...STEADY, own: 45 };
+  assert.deepEqual(widthStep({ ...STEADY, own: 24, windowWidth: 120 }, STEADY), back, 'the terminal was resized');
+  assert.deepEqual(widthStep({ ...moved, active: false }, STEADY), back, 'an inactive window is not being dragged');
+  assert.deepEqual(widthStep(moved, { ...STEADY, active: false }), back, 'nor one that was inactive a tick ago (a window switch)');
+  assert.deepEqual(widthStep(moved, null), back, 'a first reading has nothing to compare');
+  assert.deepEqual(widthStep(moved, moved), back, 'a width that did not change was not dragged');
+  assert.deepEqual(widthStep({ ...moved, panes: 3 }, STEADY), back, 'a third pane changes the layout');
+  assert.deepEqual(widthStep(moved, { ...STEADY, panes: 3 }), back, 'and so does one that just closed');
+  assert.deepEqual(widthStep({ ...STEADY, option: '45' }, STEADY), { set: null, resize: 45 }, 'another window changed the option');
+});
+
+test('widthStep: a terminal too narrow for the option keeps the option and leaves the session 20 columns', () => {
+  const narrow = { ...STEADY, option: '60', own: 60, windowWidth: 50 };
+  assert.deepEqual(widthStep(narrow, { ...STEADY, option: '60', own: 60 }), { set: null, resize: 29 });
+  assert.deepEqual(widthStep({ ...narrow, own: 29 }, null), { set: null, resize: null }, 'what fits is steady');
+  assert.deepEqual(widthStep({ ...narrow, own: 29 }, { ...narrow, own: 29 }), { set: null, resize: null });
+  assert.deepEqual(widthStep({ ...narrow, own: 25 }, { ...narrow, own: 29 }), { set: 25, resize: null }, 'a drag there still sets it');
+  assert.deepEqual(widthStep({ ...narrow, own: 60, windowWidth: 150 }, null), { set: null, resize: null }, 'wide again: back to 60');
+  assert.deepEqual(widthStep({ ...narrow, own: 10, windowWidth: 12 }, null), { set: null, resize: 1 });
+  assert.deepEqual(widthStep({ ...STEADY, own: 30, windowWidth: NaN }, null), { set: null, resize: null });
+});
+
+test('render and hit work at every width the sidebar can take', () => {
+  const strip = (v) => v.replace(/\x1b\[[0-9;]*m/g, '');
+  const rows = pick(0, 1, 2);
+  for (const width of [WIDTH_MIN, 37, WIDTH_MAX]) {
+    const out = render({ rows, width, height: 24, now: vectors.now }).split('\n').map(strip);
+    for (const l of out) assert.equal(textWidth(l), width, `${width}: ${JSON.stringify(l)}`);
+    assert.deepEqual(hit({ rows, width, height: 24, x: width - 1, y: 4, confirm: null }), { kind: 'close', id: '@1' });
+    assert.deepEqual(hit({ rows, width, height: 24, x: width - 1, y: 1, confirm: null }), { kind: 'expand', id: null });
+  }
+  const wide = render({ rows, width: 60, height: 24, now: vectors.now }).split('\n').map(strip);
+  assert.equal(wide[11], ` ◌ ${'write migration test for 0042 rollback'.padEnd(54)} ✕ `);
 });

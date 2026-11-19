@@ -35,6 +35,7 @@ Then use the mouse:
 | --- | --- |
 | a row | jump to that session |
 | drag a row | reorder the list |
+| drag the sidebar's edge | make it wider or narrower (20 to 60 columns) |
 | `✕` | close it (asks first unless it is done) |
 | `⤢` | expand the list into a table with every detail |
 | `+ new session` | a plain shell in the same folder, for any CLI you like |

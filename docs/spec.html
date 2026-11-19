@@ -85,10 +85,10 @@ li { margin: 4px 0; }
 
 <div class="summary">
 <dl>
-  <dt>What</dt><dd>A dedicated tmux server with one session (<code>band</code>). Each Claude Code session is one tmux window: a 30-column sidebar pane on the left, the CLI on the right. The sidebar lists every window with a colored state (needs input, working, done), time in that state, repo · branch, and the session's pull requests with CI state. Click a row to switch, drag it to reorder, ✕ to close, ⤢ to expand to a full-width table, <code>+ new session</code> to open a shell window in the same folder. <code>band-attach</code> brings the iTerm window forward and reopens the sessions a dead tmux server took with it.</dd>
+  <dt>What</dt><dd>A dedicated tmux server with one session (<code>band</code>). Each Claude Code session is one tmux window: a sidebar pane on the left (30 columns, draggable from 20 to 60), the CLI on the right. The sidebar lists every window with a colored state (needs input, working, done), time in that state, repo · branch, and the session's pull requests with CI state. Click a row to switch, drag it to reorder, ✕ to close, ⤢ to expand to a full-width table, <code>+ new session</code> to open a shell window in the same folder. <code>band-attach</code> brings the iTerm window forward and reopens the sessions a dead tmux server took with it.</dd>
   <dt>How it works</dt><dd>State lives in tmux <b>window user options</b> (<code>@band_state</code>, <code>@band_since</code>, …). Claude Code hooks write them from inside the pane using <code>$TMUX_PANE</code>, and keep one record file per open session for restore. Each window's sidebar is a Node program that polls <code>tmux list-windows -F</code> once a second, draws with ANSI escapes, reads SGR mouse clicks from stdin, and polls <code>gh</code> for the PRs its session's transcript mentions.</dd>
   <dt>Where it lives</dt><dd>One directory, <code>$BAND_HOME</code> (default <code>~/.local/share/band</code>): <code>bin/</code> (<code>band-new</code>, <code>band-attach</code>, <code>band-restore</code>, <code>band-state.sh</code>, <code>band-record.sh</code>), <code>sidebar.mjs</code>, <code>sidebar-core.mjs</code>, <code>hooks.mjs</code>, <code>tmux.conf</code>, <code>hooks.json</code>, and <code>state/</code>. An installer links <code>bin/</code> into <code>~/.local/bin</code> and adds the hooks to <code>~/.claude/settings.json</code>.</dd>
-  <dt>The hard parts</dt><dd>Holding the sidebar at 30 columns without breaking zoom (<code>resize-pane -x</code> unzooms a window); hit-testing clicks against the layout that was drawn; telling "closed" from "lost with the server" at session end; tmux format expansion in window names; tmux reading <code>-f</code> only at server start.</dd>
+  <dt>The hard parts</dt><dd>Holding the sidebar at its width without breaking zoom, and telling a drag of its border from every other resize (<code>resize-pane -x</code> unzooms a window); hit-testing clicks against the layout that was drawn; telling "closed" from "lost with the server" at session end; tmux format expansion in window names; tmux reading <code>-f</code> only at server start.</dd>
 </dl>
 </div>
 
@@ -135,7 +135,8 @@ li { margin: 4px 0; }
   <li><code>+ new session</code>, under the last row, opens a new window with a sidebar and a plain login shell, in the folder of the window it was clicked in, and switches to it. No CLI starts: the user picks the account and provider by what they type.</li>
   <li>⤢ expands to the table view; ⤡, any key, or clicking a row (which also switches to it) collapses.</li>
   <li>Both views list the sessions in one order, the tmux window order. Dragging a row in either view moves it; the list previews the new order while the row is held, and every window's sidebar shows the result.</li>
-  <li>The sidebar stays 30 columns wide across terminal resizes and window switches.</li>
+  <li>The sidebar is 30 columns wide until its border is dragged; any width from 20 to 60 sticks, in every window, across terminal resizes, window switches and a restart of the tmux server.</li>
+  <li>A session's title keeps up to 120 characters. Each view shows as much as it has room for, so the table shows what the sidebar cuts.</li>
   <li>Does not touch the user's own <code>~/.tmux.conf</code> or any other tmux server.</li>
 </ol>
 
@@ -164,6 +165,7 @@ li { margin: 4px 0; }
 <tr><td><code>B/state/sessions/&lt;session id&gt;</code></td><td>one file per session that has a window: four lines, <code>cwd</code>, title, tag, <code>CLAUDE_CONFIG_DIR</code> (empty for the default account). Written atomically (tmp + <code>mv</code>).</td></tr>
 <tr><td><code>B/state/attach-at</code></td><td>mtime = last time a terminal window was opened on the attach line</td></tr>
 <tr><td><code>B/state/conf-sourced</code></td><td>mtime = last time <code>tmux.conf</code> was loaded into the running server</td></tr>
+<tr><td><code>B/state/sidebar-width</code></td><td>the sidebar width, one number. The option that holds it dies with the tmux server; this file does not.</td></tr>
 <tr><td><code>B/state/sidebar.log</code></td><td>append-only log of sidebar errors (a sidebar's stderr is its pane, so it never writes there)</td></tr>
 </table></div>
 <p>A record file <b>not newer than <code>server-started</code></b> (or any record file while no server answers) belongs to a session a previous server took with it: it is <b>lost</b>. A record newer than the marker belongs to the running server.</p>
@@ -208,11 +210,11 @@ set -g allow-rename off
 set -g renumber-windows on
 set -g pane-border-style fg=colour238
 set -g pane-active-border-style fg=colour238
-set-hook -g window-resized "if -F '#{==:#{window_zoomed_flag},0}' 'resize-pane -t :.0 -x 30'"
-set-hook -g after-select-window "if -F '#{==:#{window_zoomed_flag},0}' 'resize-pane -t :.0 -x 30'"</code></pre>
+set-hook -g window-resized "if -F '#{&amp;&amp;:#{==:#{window_zoomed_flag},0},#{!=:#{@band_sidebar_width},}}' \"run-shell -C 'resize-pane -t :.0 -x #{@band_sidebar_width}'\""
+set-hook -g after-select-window "if -F '#{&amp;&amp;:#{==:#{window_zoomed_flag},0},#{!=:#{@band_sidebar_width},}}' \"run-shell -C 'resize-pane -t :.0 -x #{@band_sidebar_width}'\""</code></pre>
 <ul class="note">
   <li><code>exit-empty</code> is a <b>server</b> option (<code>-s</code>): closing the last window leaves the server running, so the record hook reads that as "closed", not "lost". Probed on tmux 3.8: <code>list-sessions</code> exits 0 on a server with no session and 1 when no server answers.</li>
-  <li>The two hooks hold the sidebar at 30 columns except in a zoomed window, because <code>resize-pane -x</code> unzooms it.</li>
+  <li>The two hooks hold the sidebar at the width in the global option <code>@band_sidebar_width</code> (7.8), except in a zoomed window, because <code>resize-pane -x</code> unzooms it, and while the option is unset. <code>resize-pane -x</code> does not expand formats; <code>run-shell -C</code> does, then runs the result as a tmux command (tmux 3.2+).</li>
   <li><code>extended-keys</code> lets Shift+Enter and similar reach Claude Code.</li>
 </ul>
 
@@ -220,7 +222,7 @@ set-hook -g after-select-window "if -F '#{==:#{window_zoomed_flag},0}' 'resize-p
 <p>Usage: <code>band-new [-n title] [-t tag] [-m model] [-C dir] [--no-attach] [-- command words…]</code>, e.g. <code>band-new -n "fix login" -C ~/code/web-app -- claude</code>. The words after <code>--</code> are joined with single spaces into the command line, which is typed into a shell, so a caller quotes for that shell. With no <code>--</code>, the command line is <code>claude</code>. <code>-C</code> defaults to the current directory; a folder that does not exist is passed through, so a restore of a deleted folder still opens a window (tmux 3.8 opens the pane in <code>$HOME</code> without an error).</p>
 <ol>
   <li>Resolve <code>TMUX_BIN</code>, <code>NODE_BIN</code> and <code>B</code> (section 3).</li>
-  <li>Title: first non-empty line of <code>-n</code> (else the folder's basename, else <code>session</code>), then <code>optionValue(title, 40)</code> (section 3), then <code>#</code> → <code>##</code>. Tag and model go through <code>optionValue(…, 40)</code> too. <code>optionValue</code> counts code points; implement it with <code>"$NODE_BIN" -e</code> or by importing it from <code>sidebar-core.mjs</code>, not with <code>cut</code>, which counts bytes or characters depending on locale. For a directory containing <code>#</code> or ending in <code>;</code>, skip <code>-c</code> and instead run the tmux command from inside that directory (<code>cd "$dir" &amp;&amp; …</code>), so the window inherits it.</li>
+  <li>Title: first non-empty line of <code>-n</code> (else the folder's basename, else <code>session</code>), then <code>optionValue(title, 120)</code> (section 3), then <code>#</code> → <code>##</code>. Tag and model go through <code>optionValue(…, 40)</code> too. <code>optionValue</code> counts code points; implement it with <code>"$NODE_BIN" -e</code> or by importing it from <code>sidebar-core.mjs</code>, not with <code>cut</code>, which counts bytes or characters depending on locale. For a directory containing <code>#</code> or ending in <code>;</code>, skip <code>-c</code> and instead run the tmux command from inside that directory (<code>cd "$dir" &amp;&amp; …</code>), so the window inherits it.</li>
   <li>If <code>has-session -t =band</code> succeeds: when <code>B/state/conf-sourced</code> is missing or older than <code>B/tmux.conf</code>, run <code>source-file B/tmux.conf</code> and touch <code>conf-sourced</code> (tmux reads <code>-f</code> only at server start, so a config edit otherwise never reaches a running server). Then <code>new-window -d -t band: -n "$title" -c "$dir" -P -F '#{window_id} #{pane_id}'</code>.<br>
   Otherwise: start the server from a clean environment (section 10, "Server environment") with <code>new-session -d -s band -n "$title" -c "$dir" -x 200 -y 50 -P -F '#{window_id} #{pane_id}'</code>, then touch <code>B/state/server-started</code> and <code>B/state/conf-sourced</code>. (A server that answers <code>list-sessions</code> but has no <code>band</code> session, after its last window closed, takes this branch too; <code>new-session</code> works on it.)</li>
   <li>Parse <code>@N %M</code> from the output (fail if it doesn't match <code>^@\d+ %\d+$</code>). Then, killing the window if any of these fail:
@@ -381,6 +383,7 @@ exit 0</code></pre>
 <tr><td><code>tableLayout</code></td><td><code>({ rows, height, start = null }) → [{ row, y }]</code></td></tr>
 <tr><td><code>dragBegin</code>, <code>dragMove</code>, <code>dragEnd</code>, <code>dragView</code>, <code>dragRows</code>, <code>dragExpired</code></td><td>the drag state machine (7.6)</td></tr>
 <tr><td><code>moveId</code></td><td><code>(ids, id, over) → ids</code></td></tr>
+<tr><td><code>widthStep</code>, <code>parseWidth</code></td><td><code>(now, prev, saved) → { set, resize }</code>, <code>(value) → number | null</code> (7.8)</td></tr>
 <tr><td><code>moveArgs</code></td><td><code>(order, id) → [tmux argument] | null</code></td></tr>
 <tr><td><code>hit</code>, <code>hitTable</code></td><td><code>({ x, y, rows, width, height, confirm }) → { kind, id }</code>; kind is <code>expand</code>, <code>collapse</code>, <code>select</code>, <code>close</code>, <code>yes</code>, <code>no</code>, <code>new</code> (normal view only) or <code>none</code>; id is the window id or null</td></tr>
 <tr><td><code>needsConfirm</code></td><td><code>(state) → boolean</code></td></tr>
@@ -395,7 +398,7 @@ exit 0</code></pre>
 <h3>7.1 Constants and looks</h3>
 <div class="scroll"><table>
 <tr><th>Name</th><th>Value</th></tr>
-<tr><td>sidebar width</td><td>30</td></tr>
+<tr><td>sidebar width</td><td>default 30, minimum 20, maximum 60</td></tr>
 <tr><td>header lines / lines per row / table header lines</td><td>2 / 4 / 3</td></tr>
 <tr><td>new-session text / lines</td><td><code> + new session</code> (14 columns) / 2 (a blank spacer, then the text)</td></tr>
 <tr><td>close columns / expand columns</td><td>3 (<code> ✕ </code>) / 2 (<code>⤢ </code>)</td></tr>
@@ -481,14 +484,14 @@ exit 0</code></pre>
 </ul>
 
 <h3>7.6 The program loop (<code>sidebar.mjs</code>)</h3>
-<p><b>Start:</b> write <code>ESC[?1002h ESC[?1006h ESC[?25l</code> (1002 reports presses, releases and motion while a button is down); stdin raw mode (when a TTY), UTF-8. <b>Exit</b> (SIGHUP, SIGTERM, SIGINT, stdin end, or the quit conditions below): write <code>ESC[?1006l ESC[?1002l ESC[?25h ESC[0m</code>, leave raw mode, exit 0. Size = <code>stdout.columns || 30</code> by <code>stdout.rows || 24</code>. Start a 1 s interval running <code>tick</code>, and run one tick at once.</p>
+<p><b>Start:</b> write <code>ESC[?1002h ESC[?1006h ESC[?25l</code> (1002 reports presses, releases and motion while a button is down); stdin raw mode (when a TTY), UTF-8. <b>Exit</b> (SIGHUP, SIGTERM, SIGINT, stdin end, or the quit conditions below): write <code>ESC[?1006l ESC[?1002l ESC[?25h ESC[0m</code>, leave raw mode, exit 0. Size = <code>stdout.columns || 30</code> by <code>stdout.rows || 24</code>. Run <code>source-file B/tmux.conf</code> without waiting for it (a server reads <code>-f</code> once, and hooks from an older config would resize the pane behind this script's back). Start a 1 s interval running <code>tick</code>, and run one tick at once.</p>
 <p><b>tick</b> (skip if a tick is in progress):</p>
 <ol>
-  <li>Remember <code>epoch = zoomEpoch</code>. <code>display-message -p -t $TMUX_PANE '#{window_id}\t#{pane_width}\t#{window_panes}\t#{session_attached}\t#{window_active}\t#{window_zoomed_flag}'</code>. On failure count it; at 3 consecutive failures quit; return. A window id that does not match <code>^@\d+$</code> is a failure too: for a pane that is gone, tmux 3.8 prints an empty line and exits 0. Else reset the count.</li>
+  <li>Remember <code>epoch = zoomEpoch</code>. <code>display-message -p -t $TMUX_PANE '#{window_id}\t#{pane_width}\t#{window_panes}\t#{session_attached}\t#{window_active}\t#{window_zoomed_flag}\t#{window_width}\t#{@band_sidebar_width}'</code>. On failure count it; at 3 consecutive failures quit; return. A window id that does not match <code>^@\d+$</code> is a failure too: for a pane that is gone, tmux 3.8 prints an empty line and exits 0. Else reset the count.</li>
   <li><code>ownWindow</code> = window id. If <code>epoch === zoomEpoch</code>, <code>zoomed = flag === '1'</code>.</li>
   <li>If <code>window_panes</code> is 1: quit (the CLI pane is gone; exiting closes the window).</li>
   <li>If zoomed and the window is not active: <code>setZoom(false)</code>.</li>
-  <li>If not zoomed, width ≠ 30, and this process's last <code>resize-pane</code> was ≥ 500 ms ago: <code>resize-pane -t $TMUX_PANE -x 30</code>.</li>
+  <li>If not zoomed: <b>holdWidth</b> (7.8) with this tick's pane width, option value, window width and active flag.</li>
   <li>Repo counter: on its values 0, 5, 10, … (it counts ticks that reach this step, starting at 0) run <b>noteRepo</b>: read <code>#{pane_current_path}</code> of <code>&lt;ownWindow&gt;.1</code>; if non-empty run the git command from <code>repoLabel</code> (2 s timeout); <code>label = optionValue(repoLabel(rev, cwd), 60)</code>; write <code>@band_repo</code> only when it differs from the last value written successfully.</li>
   <li>Kick the PR poller (7.7) without awaiting it.</li>
   <li>If the window is not active: return unless the inactive counter is at 0, 5, 10, … (a separate counter, incremented on each inactive tick, reset to 0 whenever the window is active).</li>
@@ -530,7 +533,7 @@ exit 0</code></pre>
 <tr><td>no</td><td>clear confirm</td></tr>
 <tr><td>new, and no new window is already opening</td><td>clear confirm; <b>newWindow()</b></td></tr>
 </table></div>
-<p><b>newWindow()</b>: read <code>#{pane_current_path}</code> of <code>&lt;ownWindow&gt;.1</code>. <code>new-window -t =band: -n terminal [-c &lt;dir&gt;] -P -F '#{window_id} #{pane_id}'</code>, without <code>-d</code> so it becomes the current window; skip <code>-c</code> when the folder is empty, contains <code>#</code> or ends in <code>;</code>, as <code>band-new</code> does (section 5). Parse <code>@N %M</code>; on no match return. <code>set-option -w -t @N @band_since &lt;epoch seconds&gt;</code>. <code>split-window -d -hb -l 30 -t %M &lt;node&gt; &lt;this script&gt; &lt;tmux bin&gt; &lt;socket&gt;</code> (<code>process.execPath</code> and <code>process.argv[1]</code>); if it fails, <code>kill-window -t @N</code>. Nothing is typed: pane 1 is the server's default shell, left at its prompt. A press that arrives while a <code>newWindow()</code> is running is ignored, so a double-click opens one window. A CLI started in that shell later is picked up by the hooks like any other, since they key on <code>$TMUX_PANE</code>'s window; the shell window writes no restore record until a CLI's SessionStart runs.</p>
+<p><b>newWindow()</b>: read <code>#{pane_current_path}</code> of <code>&lt;ownWindow&gt;.1</code>. <code>new-window -t =band: -n terminal [-c &lt;dir&gt;] -P -F '#{window_id} #{pane_id}'</code>, without <code>-d</code> so it becomes the current window; skip <code>-c</code> when the folder is empty, contains <code>#</code> or ends in <code>;</code>, as <code>band-new</code> does (section 5). Parse <code>@N %M</code>; on no match return. <code>set-option -w -t @N @band_since &lt;epoch seconds&gt;</code>. <code>split-window -d -hb -l &lt;the sidebar width&gt; -t %M &lt;node&gt; &lt;this script&gt; &lt;tmux bin&gt; &lt;socket&gt;</code> (<code>process.execPath</code> and <code>process.argv[1]</code>); if it fails, <code>kill-window -t @N</code>. Nothing is typed: pane 1 is the server's default shell, left at its prompt. A press that arrives while a <code>newWindow()</code> is running is ignored, so a double-click opens one window. A CLI started in that shell later is picked up by the hooks like any other, since they key on <code>$TMUX_PANE</code>'s window; the shell window writes no restore record until a CLI's SessionStart runs.</p>
 <p>A <code>select</code> hit never reaches <code>click</code>: <code>press</code> takes it. After the action, when not zoomed and the result was not collapse or new, <code>focusSession(ownWindow)</code>. Then await a tick and draw. <b>closeWindow(id)</b> = read <code>show-options -wqv -t id @band_session</code>; when it matches <code>^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$</code> delete <code>B/state/sessions/&lt;uuid&gt;</code> (find <code>B</code> from <code>dirname(socket)/..</code>); then <code>kill-window -t id</code>. Deleting the record first keeps a closed session out of a later restore even if its SessionEnd hook never runs.</p>
 
 <h3>7.7 PR poller (inside each sidebar, for its own window)</h3>
@@ -539,6 +542,22 @@ exit 0</code></pre>
   <li><b>URLs:</b> read the transcript JSONL from the last byte offset consumed (start at 0; restart at 0, with an empty URL list, when the path changes or the file is now shorter than the offset). Consume complete lines only; a trailing partial line waits for the next poll. For each line that parses as JSON: from <code>type: "assistant"</code> entries, every <code>message.content[]</code> item with <code>type: "text"</code>; from <code>type: "user"</code> entries, every <code>message.content[]</code> item with <code>type: "tool_result"</code> (its <code>content</code> is a string or an array of <code>{type: "text", text}</code>). Match <code>/(?&lt;=^|[\s([])https:\/\/github\.com\/[\w.-]+\/[\w.-]+\/pull\/\d+/g</code>. Keep unique URLs in first-seen order, at most 10: when an eleventh arrives, drop the oldest. The window's PRs are the last 3 of the list. One poll reads at most 8 MB of the transcript and the next continues from the offset; a single line longer than that is skipped.</li>
   <li><b>Fetch:</b> for each of the window's 3 URLs whose cached entry is missing, or not merged and at least 180 s old: <code>gh pr view &lt;url&gt; --json state,statusCheckRollup</code> (10 s timeout). <code>state</code> OPEN/MERGED/CLOSED → o/m/c. CI from <code>statusCheckRollup</code> (each item has <code>conclusion</code>, empty while running, or <code>state</code>): any of FAILURE, ERROR, TIMED_OUT, CANCELLED, ACTION_REQUIRED, STARTUP_FAILURE → <code>f</code>; else any item that is not SUCCESS, NEUTRAL or SKIPPED → <code>r</code>; else <code>p</code> if there are items, else empty. On a gh failure stop fetching for this poll (append one line to <code>B/state/sidebar.log</code> the first time per process) and go on to the write.</li>
   <li><b>Write:</b> the window's PRs with a cache entry that is merged or under 15 min old, in list order, as <code>prValue</code>, through <code>optionValue(v, 60)</code> with <code>#</code> removed, into <code>@band_pr</code>, only when it differs from the last value this process wrote (initially none, so the first poll writes even an empty value).</li>
+</ul>
+
+<h3>7.8 The sidebar's width</h3>
+<p>One width for every window, held in the global tmux option <code>@band_sidebar_width</code> and in the file <code>B/state/sidebar-width</code>. The user changes it by dragging the border between the two panes, which tmux does itself with mouse mode on. Probed on tmux 3.8: a border drag changes the pane's width live, fires neither <code>window-resized</code> nor <code>after-select-window</code>, and leaves the window's width alone.</p>
+<ul>
+  <li><b>parseWidth(value)</b>: the number when the trimmed value is 1 to 3 digits and from 20 to 60, else null.</li>
+  <li><b>widthStep(now, prev, saved)</b> → <code>{ set, resize }</code>, each a width or null. <code>now</code> is this tick's reading <code>{ own, option, windowWidth, active, panes }</code>, <code>prev</code> the last one that can be trusted (null when there is none), <code>saved</code> the file's content.
+    <ol>
+      <li>Option not a valid width (unset on a new server): <code>option = parseWidth(saved) ?? 30</code>, and <code>set</code> it.</li>
+      <li>Else dragged, when all hold: the window is active and has 2 panes now, there is a <code>prev</code> and it was active with 2 panes, <code>prev.own ≠ own</code>, <code>prev.windowWidth = windowWidth</code>, and <code>prev.option</code> parses to the same width. Then <code>option = clamp(own, 20, 60)</code>, and <code>set</code> it when it changed.</li>
+      <li><code>target = max(1, min(option, windowWidth − 21))</code>: when the terminal is narrower than the width asks for, the session pane keeps 20 columns and the option is left alone. <code>resize = target</code> unless <code>own</code> already equals it.</li>
+    </ol>
+    A drag is the only thing that changes a pane's width and nothing else in a reading. The conditions rule out, in order: a window switch (hooks from another config may have resized it), a third pane opening or closing, a reading that did not change, a terminal resize, and another window's sidebar changing the option.</li>
+  <li><b>holdWidth(reading)</b> in <code>sidebar.mjs</code>, run by tick only when both the local <code>zoomed</code> and the reply's zoom flag are off; otherwise forget <code>prev</code> (a reply read before a zoom or unzoom carries the other state's width). Call <code>widthStep</code>, reading the file only when the option is not a valid width. Remember the reading as <code>prev</code>. On <code>set</code>: <code>set-option -g @band_sidebar_width &lt;n&gt;</code>, remember the option as that value, and save the file. On <code>resize</code>, when this process's last resize was ≥ 500 ms ago: <code>resize-pane -t $TMUX_PANE -x &lt;n&gt;</code>, then forget <code>prev</code>: tmux gives the pane what fits with no error, so the next reading must not be compared with what was asked for. The size fallback and <code>newWindow</code>'s split use the current width.</li>
+  <li><b>Saving the file</b>: skip when the file already holds that width; else write <code>sidebar-width.&lt;pid&gt;</code> and rename it over. On a new server every window's sidebar starts at once and reads this file; a plain rewrite lets one read it empty and fall back to 30.</li>
+  <li>The launcher still splits at 30 (section 5); the new sidebar's first tick resizes it.</li>
 </ul>
 
 <h2>8. Component: <code>band-attach</code> (focus the iTerm window)</h2>
@@ -651,6 +670,8 @@ done
   <li>Submit a prompt → row goes blue ◌ with <code>now</code>. Turn ends → green ✓. Focus it → grey ✓. Trigger a permission dialog → orange ● with <code>permission: Bash</code> in the table; approve → blue.</li>
   <li>Ask the session to print a PR URL of an open PR: within one poll its badge shows the PR and CI mark.</li>
   <li>Click rows to switch; the sidebar stays 30 columns after resizing the terminal and switching windows.</li>
+  <li>Drag the border between the sidebar and the session to 45 columns: it stays, other windows show 45 when you switch to them, and <code>+ new session</code> opens at 45. Drag it far right and far left: it stops at 60 and 20. Kill the tmux server and start a session: the sidebar is still the width you left it.</li>
+  <li>Start a session with a 100-character title: the sidebar shows its start with <code>…</code>, the table on a wide terminal shows all of it.</li>
   <li>✕ on a done row closes it at once; on a working row asks yes/no first.</li>
   <li>Click <code>+ new session</code>: a window named <code>terminal</code> opens and takes focus, with the sidebar on the left and a shell prompt in the clicked window's folder; every sidebar lists it. A double-click opens one. Start <code>claude</code> there: the row picks up its state.</li>
   <li>⤢ opens the table in the sidebar's order; resizing the terminal keeps it open; any key or ⤡ collapses; clicking a row collapses and switches.</li>
