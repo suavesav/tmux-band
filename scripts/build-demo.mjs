@@ -11,7 +11,8 @@ const root = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const W = 30, PANE = 54, COLS = W + 1 + PANE, ROWS = 20;
 const CW = 7.8, LH = 17, PAD = 12, BAR = 28, CAP = 34;
 const NOW = 1763300000;
-const WIDE = 44, DRAG_LINE = 4;
+const WIDE = 44, DRAG_LINE = 4, FADE = 0.2;
+const LONG1 = 'fix login redirect after SSO callback', LONG2 = 'write a test for migration 0042';
 const COLOR = { 214: '#ffaf00', 71: '#5faf5f', 75: '#5fafff', 244: '#808080', 203: '#ff5f5f', 141: '#af87ff' };
 const FG = '#d0d0d0', BG = '#1c1c1c', ACTIVE = '#3a3a3a', DIM = '#808080', HI = '#ffffff';
 
@@ -73,10 +74,12 @@ const FRAMES = [
     rows: [s1({ state: 'done', since: NOW - 30, pr: '412:o:p' }), s2({ active: true, state: 'input', since: NOW - 4, wait: 'plan approval' }), s3()] },
   { seconds: 2.8, caption: 'Looked at a finished session? It turns grey.', click: [12, 4],
     rows: [s1({ active: true, state: 'seen', since: NOW - 40, pr: '412:o:p' }), s2({ state: 'input', since: NOW - 14, wait: 'plan approval' }), s3()], pane: PANES.loginDone },
-  { seconds: 3, caption: 'Drag a session to reorder the list.', click: [12, DRAG_LINE], dragging: '@3',
-    rows: [s3(), s1({ active: true, state: 'seen', since: NOW - 50, pr: '412:o:p', name: 'fix login redirect after SSO callback' }), s2({ state: 'input', since: NOW - 24, wait: 'plan approval', name: 'write a test for migration 0042' })], pane: PANES.loginDone },
-  { seconds: 3.4, caption: "Drag the sidebar's edge to make room for long titles.", click: [WIDE + 1, 10], w: WIDE,
-    rows: [s3(), s1({ active: true, state: 'seen', since: NOW - 60, pr: '412:o:p', name: 'fix login redirect after SSO callback' }), s2({ state: 'input', since: NOW - 34, wait: 'plan approval', name: 'write a test for migration 0042' })], pane: PANES.loginWide },
+  ...[[0.9, 12, (a, b, c) => [a, b, c]], [0.5, 8, (a, b, c) => [a, c, b]], [1.8, DRAG_LINE, (a, b, c) => [c, a, b]]].map(([seconds, line, order]) => ({
+    seconds, caption: 'Drag a session to reorder the list.', click: [12, line], dragging: '@3',
+    rows: order(s1({ active: true, state: 'seen', since: NOW - 50, pr: '412:o:p', name: LONG1 }), s2({ state: 'input', since: NOW - 24, wait: 'plan approval', name: LONG2 }), s3()), pane: PANES.loginDone })),
+  ...[[0.8, W], [0.35, 35], [0.35, 40], [2.2, WIDE]].map(([seconds, w]) => ({
+    seconds, caption: "Drag the sidebar's edge to make room for long titles.", click: [w + 1, 10], w,
+    rows: [s3(), s1({ active: true, state: 'seen', since: NOW - 60, pr: '412:o:p', name: LONG1 }), s2({ state: 'input', since: NOW - 34, wait: 'plan approval', name: LONG2 })], pane: w > 34 ? PANES.loginWide : PANES.loginDone })),
   { seconds: 3, caption: '+ new session opens a shell in the same folder. Start any CLI there.', click: [2, 20],
     rows: [s3(), s1({ state: 'seen', since: NOW - 70, pr: '412:o:p' }), s2({ state: 'input', since: NOW - 44, wait: 'plan approval' }), s4({ active: true })], pane: PANES.shell },
   { seconds: 3.6, caption: 'Start Claude there, and the row takes its name from the session.',
@@ -130,21 +133,26 @@ const height = BAR + termH + CAP;
 const total = FRAMES.reduce((sum, f) => sum + f.seconds, 0);
 
 let css = `.t text{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,"DejaVu Sans Mono",monospace;font-size:13px;white-space:pre}
-.f{opacity:0;animation-duration:${total}s;animation-iteration-count:infinite;animation-timing-function:step-end}
+.f{opacity:0;animation-duration:${total}s;animation-iteration-count:infinite;animation-timing-function:linear}
+.c{animation:c 1.2s ease-in-out infinite;transform-box:fill-box;transform-origin:center}
+@keyframes c{0%,100%{transform:scale(1)}50%{transform:scale(.72)}}
 .t text.cap{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif;font-size:14px;fill:#8b949e}
 `;
 let body = '';
 let at = 0;
 FRAMES.forEach((frame, i) => {
-  const from = n((at / total) * 100);
+  // Visible from `at`, fading in over FADE while the frame before fades out.
+  const pct = (t) => n((Math.min(Math.max(t, 0), total) / total) * 100);
+  const last = i === FRAMES.length - 1;
+  const stops = [[at, 0], [at + FADE, 1], [at + frame.seconds - (last ? FADE : 0), 1], [at + frame.seconds + (last ? 0 : FADE), 0]];
   at += frame.seconds;
-  const to = n((at / total) * 100);
-  css += `@keyframes f${i}{0%{opacity:0}${from}%{opacity:1}${to}%{opacity:0}100%{opacity:0}}\n.f${i}{animation-name:f${i}}\n`;
+  const keys = [...(stops[0][0] > 0 ? ['0%{opacity:0}'] : []), ...stops.map(([t, o]) => `${pct(t)}%{opacity:${o}}`), ...(pct(stops[3][0]) < 100 ? ['100%{opacity:0}'] : [])];
+  css += `@keyframes f${i}{${keys.join('')}}\n.f${i}{animation-name:f${i}}\n`;
   let g = `<g class="f f${i}">`;
   screen(frame).forEach((line, row) => { g += drawLine(line, BAR + PAD + (row + 1) * LH - 4.5); });
   if (frame.click) {
     const [cx, cy] = frame.click;
-    g += `<circle cx="${n(PAD + (cx - 0.5) * CW)}" cy="${n(BAR + PAD + (cy - 0.5) * LH)}" r="9" fill="none" stroke="#ffffff" stroke-width="2" opacity="0.85"/>`;
+    g += `<circle class="c" cx="${n(PAD + (cx - 0.5) * CW)}" cy="${n(BAR + PAD + (cy - 0.5) * LH)}" r="9" fill="none" stroke="#ffffff" stroke-width="2" opacity="0.85"/>`;
   }
   g += `<text class="cap" x="${width / 2}" y="${BAR + termH + 23}" text-anchor="middle">${esc(frame.caption)}</text></g>\n`;
   body += g;
