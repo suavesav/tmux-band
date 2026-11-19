@@ -11,6 +11,7 @@ const root = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const W = 30, PANE = 54, COLS = W + 1 + PANE, ROWS = 20;
 const CW = 7.8, LH = 17, PAD = 12, BAR = 28, CAP = 34;
 const NOW = 1763300000;
+const WIDE = 44, DRAG_LINE = 4;
 const COLOR = { 214: '#ffaf00', 71: '#5faf5f', 75: '#5fafff', 244: '#808080', 203: '#ff5f5f', 141: '#af87ff' };
 const FG = '#d0d0d0', BG = '#1c1c1c', ACTIVE = '#3a3a3a', DIM = '#808080', HI = '#ffffff';
 
@@ -39,15 +40,17 @@ function runs(line) {
 }
 
 const pad = (s, w) => (s.length >= w ? s.slice(0, w) : s + ' '.repeat(w - s.length));
-const paneLine = ([text = '', fg = FG] = []) => [{ text: pad(` ${text}`, PANE), fg, bg: null, bold: false }];
+const paneLine = ([text = '', fg = FG] = [], width = PANE) => [{ text: pad(` ${text}`, width), fg, bg: null, bold: false }];
 const SEP = { text: '│', fg: '#444444', bg: null, bold: false };
 
 const PANES = {
   login: [['> fix the login redirect after SSO'], [], ['● Read src/auth/callback.ts'], ['● Update src/auth/callback.ts'], ['  ⎿ +12 -4', DIM], [], ['✻ Working… (esc to interrupt)', COLOR[214]]],
   loginDone: [['> fix the login redirect after SSO'], [], ['● Update src/auth/callback.ts'], ['  ⎿ +12 -4', DIM], ['● Bash(gh pr create)'], ['  ⎿ github.com/acme/web-app/pull/412', DIM], [], ['● Opened #412. The redirect keeps the return path.'], [], ['> ', HI]],
+  loginWide: [['> fix the login redirect after SSO'], [], ['● Update src/auth/callback.ts'], ['  ⎿ +12 -4', DIM], ['● Bash(gh pr create)'], ['  ⎿ github.com/acme/web-app/pull/412', DIM], [], ['● Opened #412.'], [], ['> ', HI]],
   ask: [['> add a test for migration 0042'], [], ['● Bash(npm test -- migrations)'], [], [' Do you want to proceed?', HI], [' ❯ 1. Yes', COLOR[75]], ['   2. No']],
   run: [['> add a test for migration 0042'], [], ['● Bash(npm test -- migrations)'], ['  ⎿ 14 passed', DIM], [], ['✻ Working… (esc to interrupt)', COLOR[214]]],
   shell: [['~/code/web-app $ ', HI]],
+  named: [['~/code/web-app $ claude', HI], [], ['> add rate limiting to the upload API'], [], ['● Read src/api/upload.ts'], ['● Search(pattern: "rateLimit")'], [], ['✻ Working… (esc to interrupt)', COLOR[214]]],
 };
 
 const base = (over = {}) => ({ tag: '', wait: '', model: '', pr: '', ...over });
@@ -56,7 +59,7 @@ const s2 = (o) => base({ id: '@2', name: 'write migration test', repo: 'api · m
 const s3 = (o) => base({ id: '@3', name: 'summarize PR feedback', repo: 'docs · review-fixes', state: 'done', since: NOW - 3600, pr: '318:m:p', ...o });
 const s4 = (o) => base({ id: '@4', name: 'terminal', repo: 'web-app · fix-login', state: '', since: NOW - 5, ...o });
 
-// { seconds, caption, rows, pane | table, click: [col, line] }
+// { seconds, caption, rows, pane | table, click: [col, line], dragging: id, w: sidebar width }
 const FRAMES = [
   { seconds: 3.2, caption: 'Every session in one window. Orange needs you, blue is working, green is done.',
     rows: [s1({ active: true, state: 'working', since: NOW - 120 }), s2({ state: 'input', since: NOW - 240, wait: 'permission: Bash' }), s3()], pane: PANES.login },
@@ -66,22 +69,29 @@ const FRAMES = [
     rows: [s1({ state: 'working', since: NOW - 140 }), s2({ active: true, state: 'working', since: NOW - 2 }), s3()], pane: PANES.run },
   { seconds: 3, caption: 'A session opens a pull request: its CI shows up on the row.',
     rows: [s1({ state: 'done', since: NOW - 3, pr: '412:o:r' }), s2({ active: true, state: 'working', since: NOW - 40 }), s3()], pane: PANES.run },
-  { seconds: 3.6, caption: '⤢ expands the list into a table. Drag rows to reorder, here or in the sidebar.', table: true,
+  { seconds: 3.4, caption: '⤢ expands the list into a table with every detail.', table: true,
     rows: [s1({ state: 'done', since: NOW - 30, pr: '412:o:p' }), s2({ active: true, state: 'input', since: NOW - 4, wait: 'plan approval' }), s3()] },
   { seconds: 2.8, caption: 'Looked at a finished session? It turns grey.', click: [12, 4],
     rows: [s1({ active: true, state: 'seen', since: NOW - 40, pr: '412:o:p' }), s2({ state: 'input', since: NOW - 14, wait: 'plan approval' }), s3()], pane: PANES.loginDone },
-  { seconds: 3.6, caption: '+ new session opens a shell in the same folder. Start any CLI there.', click: [2, 20],
-    rows: [s1({ state: 'seen', since: NOW - 50, pr: '412:o:p' }), s2({ state: 'input', since: NOW - 24, wait: 'plan approval' }), s3(), s4({ active: true })], pane: PANES.shell },
+  { seconds: 3, caption: 'Drag a session to reorder the list.', click: [12, DRAG_LINE], dragging: '@3',
+    rows: [s3(), s1({ active: true, state: 'seen', since: NOW - 50, pr: '412:o:p', name: 'fix login redirect after SSO callback' }), s2({ state: 'input', since: NOW - 24, wait: 'plan approval', name: 'write a test for migration 0042' })], pane: PANES.loginDone },
+  { seconds: 3.4, caption: "Drag the sidebar's edge to make room for long titles.", click: [WIDE + 1, 10], w: WIDE,
+    rows: [s3(), s1({ active: true, state: 'seen', since: NOW - 60, pr: '412:o:p', name: 'fix login redirect after SSO callback' }), s2({ state: 'input', since: NOW - 34, wait: 'plan approval', name: 'write a test for migration 0042' })], pane: PANES.loginWide },
+  { seconds: 3, caption: '+ new session opens a shell in the same folder. Start any CLI there.', click: [2, 20],
+    rows: [s3(), s1({ state: 'seen', since: NOW - 70, pr: '412:o:p' }), s2({ state: 'input', since: NOW - 44, wait: 'plan approval' }), s4({ active: true })], pane: PANES.shell },
+  { seconds: 3.6, caption: 'Start Claude there, and the row takes its name from the session.',
+    rows: [s3(), s1({ state: 'seen', since: NOW - 90, pr: '412:o:p' }), s2({ state: 'input', since: NOW - 64, wait: 'plan approval' }), s4({ active: true, name: 'add upload rate limiting', state: 'working', since: NOW - 8, model: 'sonnet · default' })], pane: PANES.named },
 ];
 
 function screen(frame) {
   if (frame.table) {
     return renderTable({ rows: frame.rows, width: COLS, height: ROWS, now: NOW }).split('\n').map(runs);
   }
-  const side = render({ rows: frame.rows, width: W, height: ROWS, now: NOW }).split('\n').map(runs);
+  const w = frame.w || W;
+  const side = render({ rows: frame.rows, width: w, height: ROWS, now: NOW, dragging: frame.dragging || null }).split('\n').map(runs);
   const lines = [];
   for (let i = 0; i < ROWS; i++) {
-    lines.push([...(side[i] || [{ text: ' '.repeat(W) }]), SEP, ...paneLine(frame.pane[i])]);
+    lines.push([...(side[i] || [{ text: ' '.repeat(w) }]), SEP, ...paneLine(frame.pane[i], COLS - 1 - w)]);
   }
   return lines;
 }
