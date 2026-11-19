@@ -112,6 +112,32 @@ export function optionValue(s, max = 40) {
   return Array.from(clean).slice(0, max).join('').replace(/[;\s]+$/, '');
 }
 
+export const NAME_MAX = 120;
+
+export function nameOf(text) {
+  for (const row of String(text ?? '').split(/\r?\n/)) {
+    const name = optionValue(row, NAME_MAX);
+    if (name) return name;
+  }
+  return '';
+}
+
+// A transcript line's name for its window: { title } from Claude Code's
+// `ai-title` line, { prompt } from a typed prompt, null from anything else.
+export function entryName(entry) {
+  if (entry?.type === 'ai-title') {
+    const title = nameOf(entry.aiTitle);
+    return title ? { title } : null;
+  }
+  if (entry?.type !== 'user' || entry.isMeta || entry.isSidechain) return null;
+  const content = entry.message?.content;
+  const texts = typeof content === 'string' ? [content]
+    : Array.isArray(content) ? content.filter((p) => p?.type === 'text' && typeof p.text === 'string').map((p) => p.text) : [];
+  const typed = texts.map((t) => t.trim()).find((t) => t && !t.startsWith('<') && !t.startsWith('[Request interrupted'));
+  const prompt = nameOf(typed);
+  return prompt ? { prompt } : null;
+}
+
 export function parseWindows(stdout) {
   const rows = [];
   for (const line of String(stdout ?? '').split('\n')) {

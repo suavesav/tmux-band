@@ -133,6 +133,7 @@ li { margin: 4px 0; }
   <li>Each row shows title, state + time in state, an optional tag (e.g. <code>work</code> for a second account), <code>repo · branch</code> of the pane's current directory, and a badge for the PRs the session mentioned (number, CI mark or merged/closed).</li>
   <li>✕ on a row closes that window. If the state is not <code>done</code> or <code>seen</code>, the row's state line becomes <code> Close?  yes   no</code> first.</li>
   <li><code>+ new session</code>, under the last row, opens a new window with a sidebar and a plain login shell, in the folder of the window it was clicked in, and switches to it. No CLI starts: the user picks the account and provider by what they type.</li>
+  <li>A window that was opened without a title (<code>+ new session</code>, or <code>band-new</code> with no <code>-n</code>) is renamed after the Claude Code session in it: the first line of its first prompt within a few seconds, then the title Claude Code gives the session. A window opened with <code>-n</code> keeps its name.</li>
   <li>⤢ expands to the table view; ⤡, any key, or clicking a row (which also switches to it) collapses.</li>
   <li>Both views list the sessions in one order, the tmux window order. Dragging a row in either view moves it; the list previews the new order while the row is held, and every window's sidebar shows the result.</li>
   <li>The sidebar is 30 columns wide until its border is dragged; any width from 20 to 60 sticks, in every window, across terminal resizes, window switches and a restart of the tmux server.</li>
@@ -184,7 +185,8 @@ li { margin: 4px 0; }
 <tr><td><code>@band_model</code></td><td>launcher (optional)</td><td>e.g. <code>opus · plan</code>; shown in the table only.</td></tr>
 <tr><td><code>@band_repo</code></td><td>that window's own sidebar, every 5 ticks</td><td><code>repo · branch</code>, or the folder name outside a repo.</td></tr>
 <tr><td><code>@band_pr</code></td><td>that window's own sidebar (PR poller, 7.6)</td><td><code>&lt;number&gt;:&lt;o|m|c&gt;:&lt;p|f|r|&gt;</code> per PR, comma-joined, at most 3: open/merged/closed, then CI passing/failing/running/none. Example <code>88:o:r,90:o:p</code>.</td></tr>
-<tr><td>window name</td><td>launcher</td><td>session title, max 40 chars, <code>#</code> escaped as <code>##</code>.</td></tr>
+<tr><td><code>@band_unnamed</code></td><td>launcher, sidebar (<code>+ new session</code>); unset by the sidebar (7.9)</td><td><code>1</code> while the window has no title of its own; unset otherwise.</td></tr>
+<tr><td>window name</td><td>launcher; that window's own sidebar while <code>@band_unnamed</code> is 1 (7.9)</td><td>session title, max 120 code points, <code>#</code> escaped as <code>##</code>.</td></tr>
 </table></div>
 <p>Every value the launcher and the sidebar write to an option goes through <b><code>optionValue(s, max = 40)</code></b> (the hooks write <code>@band_wait</code>, <code>@band_session</code> and <code>@band_transcript</code> as their scripts show, unshortened): replace each control character (U+0000–001F, U+007F–009F) with a space, collapse runs of whitespace to one space, trim, keep the first <code>max</code> code points, then strip trailing <code>;</code> and whitespace. <code>@band_repo</code> uses max 60; <code>@band_pr</code> uses max 60 and then removes every <code>#</code>.</p>
 
@@ -229,6 +231,7 @@ set-hook -g after-select-window "if -F '#{&amp;&amp;:#{==:#{window_zoomed_flag},
     <pre><code>set-option -w -t @N @band_since "$(date +%s)"
 set-option -w -t @N @band_tag   "$tag"      # if given
 set-option -w -t @N @band_model "$model"    # if given
+set-option -w -t @N @band_unnamed 1         # if -n gave no line with text
 split-window -d -hb -l 30 -t %M  "$NODE_BIN" B/sidebar.mjs "$TMUX_BIN" "$SOCK"
 send-keys -t %M -l -- "$command_line"</code></pre>
     Then <code>send-keys -t %M Enter</code>; a failure here is logged, not fatal (the line is typed; retrying would launch twice). The CLI runs in the pane's login shell, so when it exits you get a shell back in that window.</li>
@@ -386,6 +389,7 @@ exit 0</code></pre>
 <tr><td><code>widthStep</code>, <code>parseWidth</code></td><td><code>(now, prev, saved) → { set, resize }</code>, <code>(value) → number | null</code> (7.8)</td></tr>
 <tr><td><code>moveArgs</code></td><td><code>(order, id) → [tmux argument] | null</code></td></tr>
 <tr><td><code>hit</code>, <code>hitTable</code></td><td><code>({ x, y, rows, width, height, confirm }) → { kind, id }</code>; kind is <code>expand</code>, <code>collapse</code>, <code>select</code>, <code>close</code>, <code>yes</code>, <code>no</code>, <code>new</code> (normal view only) or <code>none</code>; id is the window id or null</td></tr>
+<tr><td><code>nameOf</code>, <code>entryName</code></td><td><code>(text) → string</code>, <code>(transcript entry) → { title } | { prompt } | null</code> (7.9)</td></tr>
 <tr><td><code>needsConfirm</code></td><td><code>(state) → boolean</code></td></tr>
 <tr><td><code>age</code></td><td><code>(now, since) → string</code></td></tr>
 <tr><td><code>repoLabel</code></td><td><code>(rev, cwd) → string</code></td></tr>
@@ -487,13 +491,14 @@ exit 0</code></pre>
 <p><b>Start:</b> write <code>ESC[?1002h ESC[?1006h ESC[?25l</code> (1002 reports presses, releases and motion while a button is down); stdin raw mode (when a TTY), UTF-8. <b>Exit</b> (SIGHUP, SIGTERM, SIGINT, stdin end, or the quit conditions below): write <code>ESC[?1006l ESC[?1002l ESC[?25h ESC[0m</code>, leave raw mode, exit 0. Size = <code>stdout.columns || 30</code> by <code>stdout.rows || 24</code>. Run <code>source-file B/tmux.conf</code> without waiting for it (a server reads <code>-f</code> once, and hooks from an older config would resize the pane behind this script's back). Start a 1 s interval running <code>tick</code>, and run one tick at once.</p>
 <p><b>tick</b> (skip if a tick is in progress):</p>
 <ol>
-  <li>Remember <code>epoch = zoomEpoch</code>. <code>display-message -p -t $TMUX_PANE '#{window_id}\t#{pane_width}\t#{window_panes}\t#{session_attached}\t#{window_active}\t#{window_zoomed_flag}\t#{window_width}\t#{@band_sidebar_width}'</code>. On failure count it; at 3 consecutive failures quit; return. A window id that does not match <code>^@\d+$</code> is a failure too: for a pane that is gone, tmux 3.8 prints an empty line and exits 0. Else reset the count.</li>
+  <li>Remember <code>epoch = zoomEpoch</code>. <code>display-message -p -t $TMUX_PANE '#{window_id}\t#{pane_width}\t#{window_panes}\t#{session_attached}\t#{window_active}\t#{window_zoomed_flag}\t#{window_width}\t#{@band_sidebar_width}\t#{@band_unnamed}\t#{@band_transcript}'</code>. On failure count it; at 3 consecutive failures quit; return. A window id that does not match <code>^@\d+$</code> is a failure too: for a pane that is gone, tmux 3.8 prints an empty line and exits 0. Else reset the count.</li>
   <li><code>ownWindow</code> = window id. If <code>epoch === zoomEpoch</code>, <code>zoomed = flag === '1'</code>.</li>
   <li>If <code>window_panes</code> is 1: quit (the CLI pane is gone; exiting closes the window).</li>
   <li>If zoomed and the window is not active: <code>setZoom(false)</code>.</li>
   <li>If not zoomed: <b>holdWidth</b> (7.8) with this tick's pane width, option value, window width and active flag.</li>
   <li>Repo counter: on its values 0, 5, 10, … (it counts ticks that reach this step, starting at 0) run <b>noteRepo</b>: read <code>#{pane_current_path}</code> of <code>&lt;ownWindow&gt;.1</code>; if non-empty run the git command from <code>repoLabel</code> (2 s timeout); <code>label = optionValue(repoLabel(rev, cwd), 60)</code>; write <code>@band_repo</code> only when it differs from the last value written successfully.</li>
   <li>Kick the PR poller (7.7) without awaiting it.</li>
+  <li>If <code>@band_unnamed</code> read <code>1</code> and <code>@band_transcript</code> is not empty: <b>nameWindow</b> (7.9), awaited.</li>
   <li>If the window is not active: return unless the inactive counter is at 0, 5, 10, … (a separate counter, incremented on each inactive tick, reset to 0 whenever the window is active).</li>
   <li><code>list-windows</code> (section 3) and <code>parseWindows</code>; keep the old rows if the call fails. Note the own row's state for the PR poller's "became done" trigger.</li>
   <li>If this window's row has state <code>done</code>, the window is active, <code>session_attached</code> &gt; 0, and not zoomed: write <code>@band_state seen</code> and set the row's state locally. <code>@band_since</code> is not stamped on this change, so a seen row keeps the time it finished.</li>
@@ -533,7 +538,7 @@ exit 0</code></pre>
 <tr><td>no</td><td>clear confirm</td></tr>
 <tr><td>new, and no new window is already opening</td><td>clear confirm; <b>newWindow()</b></td></tr>
 </table></div>
-<p><b>newWindow()</b>: read <code>#{pane_current_path}</code> of <code>&lt;ownWindow&gt;.1</code>. <code>new-window -t =band: -n terminal [-c &lt;dir&gt;] -P -F '#{window_id} #{pane_id}'</code>, without <code>-d</code> so it becomes the current window; skip <code>-c</code> when the folder is empty, contains <code>#</code> or ends in <code>;</code>, as <code>band-new</code> does (section 5). Parse <code>@N %M</code>; on no match return. <code>set-option -w -t @N @band_since &lt;epoch seconds&gt;</code>. <code>split-window -d -hb -l &lt;the sidebar width&gt; -t %M &lt;node&gt; &lt;this script&gt; &lt;tmux bin&gt; &lt;socket&gt;</code> (<code>process.execPath</code> and <code>process.argv[1]</code>); if it fails, <code>kill-window -t @N</code>. Nothing is typed: pane 1 is the server's default shell, left at its prompt. A press that arrives while a <code>newWindow()</code> is running is ignored, so a double-click opens one window. A CLI started in that shell later is picked up by the hooks like any other, since they key on <code>$TMUX_PANE</code>'s window; the shell window writes no restore record until a CLI's SessionStart runs.</p>
+<p><b>newWindow()</b>: read <code>#{pane_current_path}</code> of <code>&lt;ownWindow&gt;.1</code>. <code>new-window -t =band: -n terminal [-c &lt;dir&gt;] -P -F '#{window_id} #{pane_id}'</code>, without <code>-d</code> so it becomes the current window; skip <code>-c</code> when the folder is empty, contains <code>#</code> or ends in <code>;</code>, as <code>band-new</code> does (section 5). Parse <code>@N %M</code>; on no match return. <code>set-option -w -t @N @band_since &lt;epoch seconds&gt; ; set-option -w -t @N @band_unnamed 1</code>. <code>split-window -d -hb -l &lt;the sidebar width&gt; -t %M &lt;node&gt; &lt;this script&gt; &lt;tmux bin&gt; &lt;socket&gt;</code> (<code>process.execPath</code> and <code>process.argv[1]</code>); if it fails, <code>kill-window -t @N</code>. Nothing is typed: pane 1 is the server's default shell, left at its prompt. A press that arrives while a <code>newWindow()</code> is running is ignored, so a double-click opens one window. A CLI started in that shell later is picked up by the hooks like any other, since they key on <code>$TMUX_PANE</code>'s window; the shell window writes no restore record until a CLI's SessionStart runs.</p>
 <p>A <code>select</code> hit never reaches <code>click</code>: <code>press</code> takes it. After the action, when not zoomed and the result was not collapse or new, <code>focusSession(ownWindow)</code>. Then await a tick and draw. <b>closeWindow(id)</b> = read <code>show-options -wqv -t id @band_session</code>; when it matches <code>^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$</code> delete <code>B/state/sessions/&lt;uuid&gt;</code> (find <code>B</code> from <code>dirname(socket)/..</code>); then <code>kill-window -t id</code>. Deleting the record first keeps a closed session out of a later restore even if its SessionEnd hook never runs.</p>
 
 <h3>7.7 PR poller (inside each sidebar, for its own window)</h3>
@@ -559,6 +564,21 @@ exit 0</code></pre>
   <li><b>Saving the file</b>: skip when the file already holds that width; else write <code>sidebar-width.&lt;pid&gt;</code> and rename it over. On a new server every window's sidebar starts at once and reads this file; a plain rewrite lets one read it empty and fall back to 30.</li>
   <li>The launcher still splits at 30 (section 5); the new sidebar's first tick resizes it.</li>
 </ul>
+
+<h3>7.9 Window names</h3>
+<p>A window marked <code>@band_unnamed</code> 1 is named by its own sidebar from the session's transcript. Claude Code writes its own title for a session into the transcript as lines <code>{"type":"ai-title","aiTitle":"…"}</code>, first after the first reply and again when it changes (seen in 2.1.x; not in its documentation).</p>
+<ul>
+  <li><b>nameOf(text)</b>: split on <code>\r?\n</code> and return the first <code>optionValue(line, 120)</code> that is not empty, else the empty string.</li>
+  <li><b>entryName(entry)</b>, for one parsed transcript line:
+    <ol>
+      <li><code>type</code> is <code>ai-title</code>: <code>{ title: nameOf(aiTitle) }</code>, or null when that is empty.</li>
+      <li><code>type</code> is not <code>user</code>, or <code>isMeta</code> or <code>isSidechain</code> is truthy: null.</li>
+      <li>The texts are <code>message.content</code> when it is a string, else the <code>text</code> of each of its <code>{ type: 'text' }</code> parts. Take the first whose trimmed form is not empty and starts with neither <code>&lt;</code> (slash commands, command output and reminders are wrapped in tags) nor <code>[Request interrupted</code>: <code>{ prompt: nameOf(it) }</code>, or null when there is none.</li>
+    </ol></li>
+  <li><b>Reading</b>: the transcript reader of 7.7 passes every entry to <code>entryName</code> and keeps the first <code>prompt</code> and the latest <code>title</code>. Both reset when the reader starts a file over (a new path, or a file shorter than the offset).</li>
+  <li><b>nameWindow(file)</b>: read the transcript (the same reader and offset as 7.7; it is synchronous). <code>name</code> = the title, else the prompt. Stop when there is none, or when there is no title and <code>name</code> is what this sidebar last wrote. Run <code>rename-window -t &lt;ownWindow&gt; -- &lt;name with # → ##&gt;</code> (without <code>--</code> a prompt that starts with <code>-</code> is read as a flag and the rename fails), and in the same tmux command, when there is a title, <code>; set-option -wu -t &lt;ownWindow&gt; @band_unnamed</code>. On success remember <code>name</code>, then put it in the restore record: read <code>@band_session</code>; when it is a UUID and <code>B/state/sessions/&lt;id&gt;</code> has its 4 lines, replace line 2 with <code>name</code> (unescaped) through <code>&lt;id&gt;.tmp</code> and a rename.</li>
+</ul>
+<p class="note">Probed on tmux 3.8: <code>rename-window</code> expands formats in the name, so an unescaped <code>#(…)</code> in a prompt would run a shell command; <code>optionValue</code> already strips a trailing <code>;</code>, which would end the tmux command. The window is renamed at most twice: once from the prompt, once from the title, and the mark is gone after the second. Other CLIs write no transcript the sidebar knows, so their window keeps its name.</p>
 
 <h2>8. Component: <code>band-attach</code> (focus the iTerm window)</h2>
 <p>Closing the terminal window only detaches, so the usual way back is <code>band-attach</code> (bind it to a global hotkey with Raycast, Hammerspoon or skhd). It finds the iTerm tab that already shows the session by tty and raises it, so you never get a second client.</p>
@@ -674,6 +694,7 @@ done
   <li>Start a session with a 100-character title: the sidebar shows its start with <code>…</code>, the table on a wide terminal shows all of it.</li>
   <li>✕ on a done row closes it at once; on a working row asks yes/no first.</li>
   <li>Click <code>+ new session</code>: a window named <code>terminal</code> opens and takes focus, with the sidebar on the left and a shell prompt in the clicked window's folder; every sidebar lists it. A double-click opens one. Start <code>claude</code> there: the row picks up its state.</li>
+  <li>Type a prompt in that Claude session: within a few seconds the row shows the prompt's first line in place of <code>terminal</code>; after the first reply it shows Claude Code's own title for the session, and stays on it. A window opened with <code>-n</code> never changes its name.</li>
   <li>⤢ opens the table in the sidebar's order; resizing the terminal keeps it open; any key or ⤡ collapses; clicking a row collapses and switches.</li>
   <li>Drag the first row below the third: while held it shows <code>↕</code> and the list previews the order; on release every sidebar shows the new order, the window you were in is still current, and the next <code>band-new</code> lands last. The same drag works in the table. A press and release without moving switches to the row.</li>
   <li><code>cd</code> into another repo or worktree inside a session: the repo line updates within 5 s.</li>

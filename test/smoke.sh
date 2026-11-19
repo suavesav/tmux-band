@@ -1,6 +1,6 @@
 #!/bin/bash
 # End-to-end check on a throwaway tmux server: install, open a session, click
-# "+ new session" in its sidebar, run a hook, close. Touches only a temp folder.
+# "+ new session" in its sidebar, name that window, run a hook, close. Touches only a temp folder.
 set -u
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 TMP=$(mktemp -d)
@@ -36,6 +36,22 @@ t send-keys -t "$win.0" -l $'\e[<0;3;8M\e[<0;3;8m'
 sleep 3
 check "+ new session opens a terminal window" 't list-windows -t "=band" -F "#{window_name}" | grep -qx terminal'
 check "it opens in the same folder" '[ "$(cd "$(t display-message -p -t "=band:terminal.1" "#{pane_current_path}")" && pwd -P)" = "$(cd "$TMP/work" && pwd -P)" ]'
+
+term=$(t display-message -p -t "=band:terminal" "#{window_id}")
+sid=11111111-2222-3333-4444-555555555555
+check "the terminal window is marked unnamed, the named one is not" '[ "$(t show-options -wqv -t "$term" @band_unnamed)" = 1 ] && [ -z "$(t show-options -wqv -t "$win" @band_unnamed)" ]'
+mkdir -p "$B/state/sessions"
+printf '%s\n%s\n%s\n%s\n' "$TMP/work" terminal "" "" > "$B/state/sessions/$sid"
+printf '%s\n' '{"type":"user","message":{"role":"user","content":"- fix the #12 redirect\nand more"}}' > "$TMP/t.jsonl"
+t set-option -w -t "$term" @band_session "$sid" \; set-option -w -t "$term" @band_transcript "$TMP/t.jsonl"
+sleep 3
+check "the first prompt names the window" '[ "$(t display-message -p -t "$term" "#{window_name}")" = "- fix the #12 redirect" ] && [ "$(t show-options -wqv -t "$term" @band_unnamed)" = 1 ]'
+printf '%s\n' '{"type":"ai-title","aiTitle":"Fix SSO redirect"}' >> "$TMP/t.jsonl"
+sleep 3
+check "the session title renames it and clears the mark" '[ "$(t display-message -p -t "$term" "#{window_name}")" = "Fix SSO redirect" ] && [ -z "$(t show-options -wqv -t "$term" @band_unnamed)" ]'
+check "the restore record carries the name" '[ "$(sed -n 2p "$B/state/sessions/$sid")" = "Fix SSO redirect" ] && [ "$(sed -n 1p "$B/state/sessions/$sid")" = "$TMP/work" ]'
+plain=$("$band" new --no-attach -C "$TMP/work" --)
+check "band new without -n marks its window" '[ "$(t show-options -wqv -t "$plain" @band_unnamed)" = 1 ]'
 
 t send-keys -t "$win.1" -l "echo '{}' | '$B/bin/band-state.sh' working"
 t send-keys -t "$win.1" Enter

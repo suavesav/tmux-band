@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import {
   parseWindows, render, renderTable, layout, newLine, tableLayout, moveId, moveArgs, dragBegin, dragMove, dragEnd, dragView, dragRows, dragExpired, DRAG_STALE_MS, widthStep, parseWidth, WIDTH_DEFAULT, WIDTH_MIN, WIDTH_MAX, hit, hitTable,
-  needsConfirm, age, repoLabel, fit, textWidth, optionValue, parsePrs, prValue, prBadge, prCell,
+  needsConfirm, age, repoLabel, fit, textWidth, optionValue, nameOf, entryName, parsePrs, prValue, prBadge, prCell,
 } from '../sidebar-core.mjs';
 
 const vectors = JSON.parse(fs.readFileSync(new URL('./vectors.json', import.meta.url), 'utf8'));
@@ -440,4 +440,27 @@ test('render and hit work at every width the sidebar can take', () => {
   }
   const wide = render({ rows, width: 60, height: 24, now: vectors.now }).split('\n').map(strip);
   assert.equal(wide[11], ` ◌ ${'write migration test for 0042 rollback'.padEnd(54)} ✕ `);
+});
+
+test('nameOf is the first line with text, cleaned and cut to 120', () => {
+  assert.equal(nameOf('\n  \n fix\tthe  login ;\nsecond'), 'fix the login');
+  assert.equal(nameOf('x'.repeat(200)).length, 120);
+  assert.equal(nameOf(''), '');
+  assert.equal(nameOf(undefined), '');
+});
+
+test('entryName reads a title or a typed prompt from a transcript line', () => {
+  const user = (content, more = {}) => ({ type: 'user', message: { role: 'user', content }, ...more });
+  assert.deepEqual(entryName({ type: 'ai-title', aiTitle: ' Fix SSO redirect ' }), { title: 'Fix SSO redirect' });
+  assert.equal(entryName({ type: 'ai-title', aiTitle: '' }), null);
+  assert.equal(entryName({ type: 'ai-title' }), null);
+  assert.deepEqual(entryName(user('fix the redirect\nplease')), { prompt: 'fix the redirect' });
+  assert.deepEqual(entryName(user([{ type: 'text', text: '<system-reminder>x</system-reminder>' }, { type: 'text', text: 'real one' }])), { prompt: 'real one' });
+  assert.equal(entryName(user('<command-name>/clear</command-name>')), null);
+  assert.equal(entryName(user('[Request interrupted by user]')), null);
+  assert.equal(entryName(user([{ type: 'tool_result', content: 'ok' }])), null);
+  assert.equal(entryName(user('hidden', { isMeta: true })), null);
+  assert.equal(entryName(user('agent prompt', { isSidechain: true })), null);
+  assert.equal(entryName({ type: 'assistant', message: { content: [{ type: 'text', text: 'hi' }] } }), null);
+  assert.equal(entryName(null), null);
 });

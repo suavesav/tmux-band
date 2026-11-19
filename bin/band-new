@@ -55,10 +55,12 @@ const title = optionValue(first, 120) || optionValue(base, 120) || "session";
 console.log(title.replaceAll("#", "##"));
 console.log(optionValue(tag, 40));
 console.log(optionValue(model, 40));
+console.log(optionValue(first, 120) ? "" : "1");
 ' -- "$B/sidebar-core.mjs" "$title" "$dir" "$tag" "$model") || { echo "band-new: could not shape the title" >&2; exit 1; }
 title=$(printf '%s\n' "$vals" | sed -n 1p)
 tag=$(printf '%s\n' "$vals" | sed -n 2p)
 model=$(printf '%s\n' "$vals" | sed -n 3p)
+unnamed=$(printf '%s\n' "$vals" | sed -n 4p)
 
 # tmux format-expands -c and ends a command at a trailing ";", so a folder
 # with "#" or a final ";" is entered instead of named.
@@ -104,6 +106,7 @@ fail() {
 t set-option -w -t "$win" @band_since "$(date +%s)" || fail "could not stamp the window"
 if [ -n "$tag" ]; then t set-option -w -t "$win" @band_tag "$tag" || fail "could not set the tag"; fi
 if [ -n "$model" ]; then t set-option -w -t "$win" @band_model "$model" || fail "could not set the model"; fi
+if [ -n "$unnamed" ]; then t set-option -w -t "$win" @band_unnamed 1 || fail "could not mark the window"; fi
 t split-window -d -hb -l 30 -t "$pane" "$NODE_BIN" "$B/sidebar.mjs" "$TMUX_BIN" "$SOCK" || fail "could not open the sidebar"
 if [ -n "$cmd" ]; then
   # tmux reads a final ";" as a command separator and turns "\;" back into ";".

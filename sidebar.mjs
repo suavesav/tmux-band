@@ -5,7 +5,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import {
   parseWindows, render, renderTable, hit, hitTable, needsConfirm, dragBegin, dragMove, dragEnd, dragView, dragExpired,
-  repoLabel, optionValue, prValue, widthStep, parseWidth, WIDTH_DEFAULT,
+  repoLabel, optionValue, prValue, widthStep, parseWidth, WIDTH_DEFAULT, entryName,
 } from './sidebar-core.mjs';
 
 const [TMUX_BIN, SOCK] = process.argv.slice(2);
@@ -30,6 +30,7 @@ const LIST_FORMAT = [
 const OWN_FORMAT = [
   '#{window_id}', '#{pane_width}', '#{window_panes}', '#{session_attached}',
   '#{window_active}', '#{window_zoomed_flag}', '#{window_width}', '#{@band_sidebar_width}',
+  '#{@band_unnamed}', '#{@band_transcript}',
 ].join('\t');
 
 function findBin(name) {
@@ -163,11 +164,16 @@ function transcriptTexts(entry) {
   return texts;
 }
 
+// What the transcript at pr.path says the window is called.
+const naming = { prompt: '', title: '', written: '' };
+
 function readTranscript(file) {
   if (file !== pr.path) {
     pr.path = file;
     pr.offset = 0;
     pr.urls = [];
+    naming.prompt = '';
+    naming.title = '';
   }
   let fd;
   try {
@@ -194,6 +200,9 @@ function readTranscript(file) {
       } catch {
         continue;
       }
+      const name = entryName(entry);
+      if (name?.title) naming.title = name.title;
+      else if (name?.prompt && !naming.prompt) naming.prompt = name.prompt;
       for (const t of transcriptTexts(entry)) {
         for (const url of t.match(PR_URL) ?? []) {
           if (pr.urls.includes(url)) continue;
@@ -271,6 +280,32 @@ async function kickPrs() {
   }
 }
 
+// ---- name ----
+
+function retitleRecord(session, title) {
+  if (!UUID.test(session)) return;
+  const file = path.join(B, 'state', 'sessions', session);
+  try {
+    const rows = fs.readFileSync(file, 'utf8').split('\n');
+    if (rows.length < 4) return;
+    rows[1] = title;
+    fs.writeFileSync(`${file}.tmp`, rows.join('\n'));
+    fs.renameSync(`${file}.tmp`, file);
+  } catch { /* no record */ }
+}
+
+// A window marked @band_unnamed takes the first prompt, then the ai title.
+async function nameWindow(file) {
+  readTranscript(file);
+  const name = naming.title || naming.prompt;
+  if (!name || (!naming.title && name === naming.written)) return;
+  const args = ['rename-window', '-t', ownWindow, '--', name.replace(/#/g, '##')];
+  if (naming.title) args.push(';', 'set-option', '-wu', '-t', ownWindow, '@band_unnamed');
+  if ((await tmux(args)) === null) return;
+  naming.written = name;
+  retitleRecord(line(await tmux(['show-options', '-wqv', '-t', ownWindow, '@band_session'])), name);
+}
+
 // ---- width ----
 
 function savedWidth() {
@@ -318,7 +353,7 @@ async function tickBody() {
     return;
   }
   failures = 0;
-  const [windowId, paneWidth, panes, attached, activeFlag, zoomFlag, windowWidth, widthOption = ''] = own;
+  const [windowId, paneWidth, panes, attached, activeFlag, zoomFlag, windowWidth, widthOption = '', unnamed = '', transcript = ''] = own;
   ownWindow = windowId;
   if (epoch === zoomEpoch) zoomed = zoomFlag === '1';
   if (panes === '1') return quit();
@@ -329,6 +364,7 @@ async function tickBody() {
   else await holdWidth({ own: Number(paneWidth), option: widthOption, windowWidth: Number(windowWidth), active, panes: Number(panes) });
   if (repoTicks++ % 5 === 0) noteRepo().catch((e) => log(`repo: ${e?.stack || e}`));
   kickPrs();
+  if (unnamed === '1' && transcript) await nameWindow(transcript).catch((e) => log(`name: ${e?.stack || e}`));
   if (active) inactiveTicks = 0;
   else if (inactiveTicks++ % 5 !== 0) return;
   const listed = await tmux(['list-windows', '-t', '=band', '-F', LIST_FORMAT]);
@@ -383,7 +419,7 @@ async function newWindow() {
     const made = await tmux(args, odd && fs.existsSync(dir) ? { cwd: dir } : {});
     const m = /^(@\d+) (%\d+)$/.exec(line(made));
     if (!m) return;
-    await tmux(['set-option', '-w', '-t', m[1], '@band_since', String(Math.floor(Date.now() / 1000))]);
+    await tmux(['set-option', '-w', '-t', m[1], '@band_since', String(Math.floor(Date.now() / 1000)), ';', 'set-option', '-w', '-t', m[1], '@band_unnamed', '1']);
     const split = await tmux(['split-window', '-d', '-hb', '-l', String(sidebarWidth), '-t', m[2], process.execPath, process.argv[1], TMUX_BIN, SOCK]);
     if (split === null) await tmux(['kill-window', '-t', m[1]]);
   } finally {

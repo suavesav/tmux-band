@@ -38,7 +38,7 @@ Then use the mouse:
 | drag the sidebar's edge | make it wider or narrower (20 to 60 columns) |
 | `✕` | close it (asks first unless it is done) |
 | `⤢` | expand the list into a table with every detail |
-| `+ new session` | a plain shell in the same folder, for any CLI you like |
+| `+ new session` | a plain shell in the same folder, for any CLI you like; it is named after the Claude session you start there |
 
 Close the terminal window whenever you want. The sessions keep running; `band` brings them back.
 
@@ -47,6 +47,7 @@ Close the terminal window whenever you want. The sessions keep running; `band` b
 - **● orange**: needs input. A permission prompt, a plan to approve, a question.
 - **◌ blue**: working.
 - **✓ green**: done, and you have not looked yet. It turns grey once you do.
+- What each session is about: the name you gave it, or its first prompt and then Claude's own title for it.
 - How long each session has been in that state.
 - The repo and branch it is in.
 - The pull requests it mentions, with CI: `#412 ✓`, `✗`, `◌`, `merged` (needs `gh`).
