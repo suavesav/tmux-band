@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 // Writes docs/demo.svg: an animated walk through the sidebar, drawn by
-// sidebar-core.mjs (the session pane's text is scripted).
+// sidebar-core.mjs (the session pane's text, the pointer and the typing are
+// scripted on one timeline).
 //   node scripts/build-demo.mjs
 import fs from 'node:fs';
 import path from 'node:path';
@@ -11,8 +12,7 @@ const root = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const W = 30, PANE = 54, COLS = W + 1 + PANE, ROWS = 20;
 const CW = 7.8, LH = 17, PAD = 12, BAR = 28, CAP = 34;
 const NOW = 1763300000;
-const WIDE = 44, DRAG_LINE = 4, FADE = 0.2;
-const LONG1 = 'fix login redirect after SSO callback', LONG2 = 'write a test for migration 0042';
+const WIDE = 44;
 const COLOR = { 214: '#ffaf00', 71: '#5faf5f', 75: '#5fafff', 244: '#808080', 203: '#ff5f5f', 141: '#af87ff' };
 const FG = '#d0d0d0', BG = '#1c1c1c', ACTIVE = '#3a3a3a', DIM = '#808080', HI = '#ffffff';
 
@@ -41,60 +41,177 @@ function runs(line) {
 }
 
 const pad = (s, w) => (s.length >= w ? s.slice(0, w) : s + ' '.repeat(w - s.length));
-const paneLine = ([text = '', fg = FG] = [], width = PANE) => [{ text: pad(` ${text}`, width), fg, bg: null, bold: false }];
+const paneLine = ([text = '', fg = FG] = [], width) => [{ text: pad(` ${text}`, width), fg, bg: null, bold: false }];
 const SEP = { text: '│', fg: '#444444', bg: null, bold: false };
 
+const SHELL = '~/code/web-app $ ';
+const PROMPT = 'add rate limiting to the upload API';
+const WORKING = ['✻ Working… (esc to interrupt)', COLOR[214]];
 const PANES = {
-  login: [['> fix the login redirect after SSO'], [], ['● Read src/auth/callback.ts'], ['● Update src/auth/callback.ts'], ['  ⎿ +12 -4', DIM], [], ['✻ Working… (esc to interrupt)', COLOR[214]]],
-  loginDone: [['> fix the login redirect after SSO'], [], ['● Update src/auth/callback.ts'], ['  ⎿ +12 -4', DIM], ['● Bash(gh pr create)'], ['  ⎿ github.com/acme/web-app/pull/412', DIM], [], ['● Opened #412. The redirect keeps the return path.'], [], ['> ', HI]],
-  loginWide: [['> fix the login redirect after SSO'], [], ['● Update src/auth/callback.ts'], ['  ⎿ +12 -4', DIM], ['● Bash(gh pr create)'], ['  ⎿ github.com/acme/web-app/pull/412', DIM], [], ['● Opened #412.'], [], ['> ', HI]],
+  login: [['> fix the login redirect after SSO'], [], ['● Read src/auth/callback.ts'], ['● Update src/auth/callback.ts'], ['  ⎿ +12 -4', DIM], [], WORKING],
+  loginDone: [['> fix the login redirect after SSO'], [], ['● Update src/auth/callback.ts'], ['  ⎿ +12 -4', DIM], ['● Bash(gh pr create)'], ['  ⎿ github.com/acme/web-app/pull/412', DIM], [], ['● Opened #412.'], [], ['> ', HI]],
   ask: [['> add a test for migration 0042'], [], ['● Bash(npm test -- migrations)'], [], [' Do you want to proceed?', HI], [' ❯ 1. Yes', COLOR[75]], ['   2. No']],
-  run: [['> add a test for migration 0042'], [], ['● Bash(npm test -- migrations)'], ['  ⎿ 14 passed', DIM], [], ['✻ Working… (esc to interrupt)', COLOR[214]]],
-  shell: [['~/code/web-app $ ', HI]],
-  named: [['~/code/web-app $ claude', HI], [], ['> add rate limiting to the upload API'], [], ['● Read src/api/upload.ts'], ['● Search(pattern: "rateLimit")'], [], ['✻ Working… (esc to interrupt)', COLOR[214]]],
+  run: [['> add a test for migration 0042'], [], ['● Bash(npm test -- migrations)'], ['  ⎿ 14 passed', DIM], [], WORKING],
+  shell: [[`${SHELL}claude`, HI]],
+  claude: [[`${SHELL}claude`, HI], [], ['✻ Welcome to Claude Code', COLOR[214]], [], [`> ${PROMPT}`]],
+  thinking: [[`> ${PROMPT}`], [], ['✻ Thinking…', COLOR[214]]],
+  reading: [[`> ${PROMPT}`], [], ['● Read src/api/upload.ts'], [], WORKING],
+  searching: [[`> ${PROMPT}`], [], ['● Read src/api/upload.ts'], ['● Search(pattern: "rateLimit")'], [], WORKING],
 };
 
 const base = (over = {}) => ({ tag: '', wait: '', model: '', pr: '', ...over });
-const s1 = (o) => base({ id: '@1', name: 'fix login redirect', repo: 'web-app · fix-login', model: 'sonnet · auto', ...o });
-const s2 = (o) => base({ id: '@2', name: 'write migration test', repo: 'api · main', tag: 'work', model: 'opus · default', ...o });
+const s1 = (o) => base({ id: '@1', name: 'fix login redirect after SSO callback', repo: 'web-app · fix-login', model: 'sonnet · auto', ...o });
+const s2 = (o) => base({ id: '@2', name: 'write a test for migration 0042', repo: 'api · main', tag: 'work', model: 'opus · default', ...o });
 const s3 = (o) => base({ id: '@3', name: 'summarize PR feedback', repo: 'docs · review-fixes', state: 'done', since: NOW - 3600, pr: '318:m:p', ...o });
-const s4 = (o) => base({ id: '@4', name: 'terminal', repo: 'web-app · fix-login', state: '', since: NOW - 5, ...o });
+const s4 = (o) => base({ id: '@4', name: 'terminal', repo: 'web-app · fix-login', state: '', ...o });
 
-// { seconds, caption, rows, pane | table, click: [col, line], dragging: id, w: sidebar width }
-const FRAMES = [
-  { seconds: 3.2, caption: 'Every session in one window. Orange needs you, blue is working, green is done.',
-    rows: [s1({ active: true, state: 'working', since: NOW - 120 }), s2({ state: 'input', since: NOW - 240, wait: 'permission: Bash' }), s3()], pane: PANES.login },
-  { seconds: 2.6, caption: 'Click a session to jump to it.', click: [12, 8],
-    rows: [s1({ state: 'working', since: NOW - 130 }), s2({ active: true, state: 'input', since: NOW - 250, wait: 'permission: Bash' }), s3()], pane: PANES.ask },
-  { seconds: 2.6, caption: 'Answer it, and the row goes back to blue.',
-    rows: [s1({ state: 'working', since: NOW - 140 }), s2({ active: true, state: 'working', since: NOW - 2 }), s3()], pane: PANES.run },
-  { seconds: 3, caption: 'A session opens a pull request: its CI shows up on the row.',
-    rows: [s1({ state: 'done', since: NOW - 3, pr: '412:o:r' }), s2({ active: true, state: 'working', since: NOW - 40 }), s3()], pane: PANES.run },
-  { seconds: 3.4, caption: '⤢ expands the list into a table with every detail.', table: true,
-    rows: [s1({ state: 'done', since: NOW - 30, pr: '412:o:p' }), s2({ active: true, state: 'input', since: NOW - 4, wait: 'plan approval' }), s3()] },
-  { seconds: 2.8, caption: 'Looked at a finished session? It turns grey.', click: [12, 4],
-    rows: [s1({ active: true, state: 'seen', since: NOW - 40, pr: '412:o:p' }), s2({ state: 'input', since: NOW - 14, wait: 'plan approval' }), s3()], pane: PANES.loginDone },
-  ...[[0.9, 12, (a, b, c) => [a, b, c]], [0.5, 8, (a, b, c) => [a, c, b]], [1.8, DRAG_LINE, (a, b, c) => [c, a, b]]].map(([seconds, line, order]) => ({
-    seconds, caption: 'Drag a session to reorder the list.', click: [12, line], dragging: '@3',
-    rows: order(s1({ active: true, state: 'seen', since: NOW - 50, pr: '412:o:p', name: LONG1 }), s2({ state: 'input', since: NOW - 24, wait: 'plan approval', name: LONG2 }), s3()), pane: PANES.loginDone })),
-  ...[[0.8, W], [0.35, 35], [0.35, 40], [2.2, WIDE]].map(([seconds, w]) => ({
-    seconds, caption: "Drag the sidebar's edge to make room for long titles.", click: [w + 1, 10], w,
-    rows: [s3(), s1({ active: true, state: 'seen', since: NOW - 60, pr: '412:o:p', name: LONG1 }), s2({ state: 'input', since: NOW - 34, wait: 'plan approval', name: LONG2 })], pane: w > 34 ? PANES.loginWide : PANES.loginDone })),
-  { seconds: 3, caption: '+ new session opens a shell in the same folder. Start any CLI there.', click: [2, 20],
-    rows: [s3(), s1({ state: 'seen', since: NOW - 70, pr: '412:o:p' }), s2({ state: 'input', since: NOW - 44, wait: 'plan approval' }), s4({ active: true })], pane: PANES.shell },
-  { seconds: 3.6, caption: 'Start Claude there, and the row takes its name from the session.',
-    rows: [s3(), s1({ state: 'seen', since: NOW - 90, pr: '412:o:p' }), s2({ state: 'input', since: NOW - 64, wait: 'plan approval' }), s4({ active: true, name: 'add upload rate limiting', state: 'working', since: NOW - 8, model: 'sonnet · default' })], pane: PANES.named },
-];
+// ---- the timeline ----
+// states: { at, rows, pane | table, w, dragging, typing: { line, skip, text, from, to } }
+// points: the pointer's [t, col, line, linear]; rings: [from, to] it is held down.
+const states = [], points = [], rings = [], captions = [];
+let t = 0;
+let at = [62, 12];
+const show = (state) => states.push({ at: t, ...state });
+const wait = (seconds) => { t += seconds; };
+const caption = (text) => captions.push({ at: t, text });
+function move(col, line, seconds = 0.8, linear = false) {
+  points.push([t, ...at, linear]);
+  t += seconds;
+  at = [col, line];
+  points.push([t, ...at, false]);
+}
+const click = () => { rings.push([t, t]); t += 0.12; };
+// The state last shown reveals `text` one character at a time.
+function type(line, skip, text, perChar) {
+  states[states.length - 1].typing = { line, skip, text, from: t, to: t + text.length * perChar };
+  t += text.length * perChar;
+}
 
-function screen(frame) {
-  if (frame.table) {
-    return renderTable({ rows: frame.rows, width: COLS, height: ROWS, now: NOW }).split('\n').map(runs);
+const one = (o) => s1({ state: 'working', since: NOW - 120, ...o });
+const two = (o) => s2({ state: 'input', since: NOW - 240, wait: 'permission: Bash', ...o });
+
+caption('Every session in one window. Orange needs you, blue is working, green is done.');
+show({ rows: [one({ active: true }), two(), s3()], pane: PANES.login });
+wait(2.6);
+
+caption('Click a session to jump to it.');
+move(12, 8);
+click();
+show({ rows: [one(), two({ active: true }), s3()], pane: PANES.ask });
+wait(0.9);
+
+caption('Answer it, and the row goes back to blue.');
+move(38, 6, 0.7);
+wait(0.5);
+const ran = t;
+const twoRun = (o) => s2({ state: 'working', since: NOW + ran, ...o });
+show({ rows: [one(), twoRun({ active: true }), s3()], pane: PANES.run });
+wait(1.6);
+
+caption('A session opens a pull request: its CI shows up on the row.');
+const done = t;
+const oneDone = (o) => s1({ state: 'done', since: NOW + done, pr: '412:o:p', ...o });
+show({ rows: [oneDone({ pr: '412:o:r' }), twoRun({ active: true }), s3()], pane: PANES.run });
+wait(1.6);
+show({ rows: [oneDone(), twoRun({ active: true }), s3()], pane: PANES.run });
+wait(1.3);
+
+caption('Looked at a finished session? It turns grey.');
+move(12, 4);
+click();
+const oneSeen = (o) => oneDone({ state: 'seen', ...o });
+const twoPlan = (o) => s2({ state: 'input', since: NOW + t, wait: 'plan approval', ...o });
+show({ rows: [oneSeen({ active: true }), twoRun(), s3()], pane: PANES.loginDone });
+wait(1.5);
+
+caption('⤢ expands the list into a table with every detail.');
+move(29, 1, 0.7);
+click();
+const planned = twoPlan();
+show({ rows: [oneSeen({ active: true }), planned, s3()], table: true });
+wait(2.2);
+move(80, 1, 0.9);
+click();
+show({ rows: [oneSeen({ active: true }), planned, s3()], pane: PANES.loginDone });
+wait(0.4);
+
+caption('Drag a session to reorder the list.');
+move(12, 12, 0.8);
+wait(0.2);
+{
+  const from = t;
+  const held = (rows) => show({ rows, pane: PANES.loginDone, dragging: '@3' });
+  held([oneSeen({ active: true }), planned, s3()]);
+  wait(0.25);
+  const start = t, seconds = 1.3;
+  move(12, 4, seconds, true);
+  const end = t;
+  t = start + seconds * 0.25;
+  held([oneSeen({ active: true }), s3(), planned]);
+  t = start + seconds * 0.75;
+  held([s3(), oneSeen({ active: true }), planned]);
+  t = end + 0.3;
+  rings.push([from, t]);
+}
+const after = (o = {}) => [s3(), oneSeen({ active: !o.plain }), planned];
+show({ rows: after(), pane: PANES.loginDone });
+wait(0.8);
+
+caption("Drag the sidebar's edge to make room for long titles.");
+move(W + 1, 10, 0.8);
+wait(0.2);
+{
+  const from = t;
+  wait(0.2);
+  const start = t, seconds = 1.5, steps = (WIDE - W) / 2;
+  move(WIDE + 1, 10, seconds, true);
+  const end = t;
+  for (let i = 1; i <= steps; i++) {
+    t = start + (seconds * (i - 0.5)) / steps;
+    show({ rows: after(), pane: PANES.loginDone, w: W + i * 2 });
   }
-  const w = frame.w || W;
-  const side = render({ rows: frame.rows, width: w, height: ROWS, now: NOW, dragging: frame.dragging || null }).split('\n').map(runs);
+  t = end + 0.3;
+  rings.push([from, t]);
+}
+wait(1.2);
+
+caption('+ new session opens a shell in the same folder.');
+move(5, 16, 0.9);
+click();
+const opened = t;
+const four = (o) => s4({ active: true, since: NOW + opened, ...o });
+show({ rows: [...after({ plain: true }), four()], pane: PANES.shell, w: WIDE });
+wait(0.5);
+move(66, 5, 0.7);
+type(0, SHELL.length, 'claude', 0.11);
+wait(0.5);
+
+caption('Start Claude there, and the row takes its name from the session.');
+show({ rows: [...after({ plain: true }), four()], pane: PANES.claude, w: WIDE });
+wait(0.7);
+type(4, 2, PROMPT, 0.06);
+wait(0.4);
+const asked = t;
+const busy = (o) => four({ state: 'working', since: NOW + asked, model: 'sonnet · default', ...o });
+show({ rows: [...after({ plain: true }), busy()], pane: PANES.thinking, w: WIDE });
+wait(1.3);
+show({ rows: [...after({ plain: true }), busy({ name: PROMPT })], pane: PANES.reading, w: WIDE });
+wait(1.7);
+show({ rows: [...after({ plain: true }), busy({ name: 'Add upload rate limiting' })], pane: PANES.searching, w: WIDE });
+wait(2.8);
+points.push([t, ...at, false]);
+const total = t;
+
+function screen(state) {
+  const now = NOW + Math.floor(state.at);
+  if (state.table) {
+    return renderTable({ rows: state.rows, width: COLS, height: ROWS, now }).split('\n').map(runs);
+  }
+  const w = state.w || W;
+  const side = render({ rows: state.rows, width: w, height: ROWS, now, dragging: state.dragging || null }).split('\n').map(runs);
   const lines = [];
   for (let i = 0; i < ROWS; i++) {
-    lines.push([...(side[i] || [{ text: ' '.repeat(w) }]), SEP, ...paneLine(frame.pane[i], COLS - 1 - w)]);
+    lines.push([...(side[i] || [{ text: ' '.repeat(w) }]), SEP, ...paneLine(state.pane[i], COLS - 1 - w)]);
   }
   return lines;
 }
@@ -130,43 +247,70 @@ function drawLine(line, y) {
 const width = n(PAD * 2 + COLS * CW);
 const termH = ROWS * LH + PAD * 2;
 const height = BAR + termH + CAP;
-const total = FRAMES.reduce((sum, f) => sum + f.seconds, 0);
+const pct = (seconds) => Number(((Math.min(Math.max(seconds, 0), total) / total) * 100).toFixed(3));
+const px = (col) => n(PAD + (col - 0.5) * CW);
+const py = (line) => n(BAR + PAD + (line - 0.5) * LH);
+// [[seconds, declarations]] to one @keyframes body; the first and last hold to the ends.
+function keyframes(stops) {
+  const out = [...stops];
+  if (pct(out[0][0]) > 0) out.unshift([0, out[0][1]]);
+  if (pct(out[out.length - 1][0]) < 100) out.push([total, out[out.length - 1][1]]);
+  return out.map(([seconds, css]) => `${pct(seconds)}%{${css}}`).join('');
+}
 
 let css = `.t text{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,"DejaVu Sans Mono",monospace;font-size:13px;white-space:pre}
-.f{opacity:0;animation-duration:${total}s;animation-iteration-count:infinite;animation-timing-function:linear}
-.c{animation:c 1.2s ease-in-out infinite;transform-box:fill-box;transform-origin:center}
-@keyframes c{0%,100%{transform:scale(1)}50%{transform:scale(.72)}}
-.t text.cap{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif;font-size:14px;fill:#8b949e}
+.a{animation-duration:${n(total)}s;animation-iteration-count:infinite;animation-timing-function:linear}
+.s{opacity:0;animation-timing-function:step-end}
+.cap{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif;font-size:14px;fill:#8b949e;opacity:0}
+.r{transform-box:fill-box;transform-origin:center}
 `;
 let body = '';
-let at = 0;
-FRAMES.forEach((frame, i) => {
-  // Visible from `at`, fading in over FADE while the frame before fades out.
-  const pct = (t) => n((Math.min(Math.max(t, 0), total) / total) * 100);
-  const last = i === FRAMES.length - 1;
-  const stops = [[at, 0], [at + FADE, 1], [at + frame.seconds - (last ? FADE : 0), 1], [at + frame.seconds + (last ? 0 : FADE), 0]];
-  at += frame.seconds;
-  const keys = [...(stops[0][0] > 0 ? ['0%{opacity:0}'] : []), ...stops.map(([t, o]) => `${pct(t)}%{opacity:${o}}`), ...(pct(stops[3][0]) < 100 ? ['100%{opacity:0}'] : [])];
-  css += `@keyframes f${i}{${keys.join('')}}\n.f${i}{animation-name:f${i}}\n`;
-  let g = `<g class="f f${i}">`;
-  screen(frame).forEach((line, row) => { g += drawLine(line, BAR + PAD + (row + 1) * LH - 4.5); });
-  if (frame.click) {
-    const [cx, cy] = frame.click;
-    g += `<circle class="c" cx="${n(PAD + (cx - 0.5) * CW)}" cy="${n(BAR + PAD + (cy - 0.5) * LH)}" r="9" fill="none" stroke="#ffffff" stroke-width="2" opacity="0.85"/>`;
+states.forEach((state, i) => {
+  const until = i + 1 < states.length ? states[i + 1].at : total;
+  css += `@keyframes s${i}{${keyframes([[0, `opacity:${state.at > 0 ? 0 : 1}`], [state.at, 'opacity:1'], [until, 'opacity:0']])}}\n.s${i}{animation-name:s${i}}\n`;
+  let g = `<g class="a s s${i}">`;
+  screen(state).forEach((line, row) => { g += drawLine(line, BAR + PAD + (row + 1) * LH - 4.5); });
+  if (state.typing) {
+    // A background-coloured cover slides off the typed text one cell per step.
+    const { line, skip, text, from, to } = state.typing;
+    const x = n(PAD + ((state.w || W) + 2 + skip) * CW);
+    const y = n(BAR + PAD + line * LH + 0.5);
+    const shift = n(text.length * CW);
+    css += `@keyframes k${i}{${keyframes([[from, `transform:translateX(0);animation-timing-function:steps(${text.length},end)`], [to, `transform:translateX(${shift}px)`]])}}\n.k${i}{animation-name:k${i}}\n`;
+    g += `<g class="a k${i}"><rect x="${x}" y="${y}" width="${n(shift + 1)}" height="${LH}" fill="${BG}"/><rect x="${x}" y="${n(y + 1.5)}" width="${n(CW - 1)}" height="${LH - 3}" fill="${FG}" opacity="0.75"/></g>`;
   }
-  g += `<text class="cap" x="${width / 2}" y="${BAR + termH + 23}" text-anchor="middle">${esc(frame.caption)}</text></g>\n`;
-  body += g;
+  body += `${g}</g>\n`;
 });
+
+let caps = '';
+captions.forEach((cap, i) => {
+  const until = i + 1 < captions.length ? captions[i + 1].at : total;
+  const fade = 0.25;
+  css += `@keyframes c${i}{${keyframes([[cap.at, 'opacity:0'], [cap.at + fade, 'opacity:1'], [until - fade, 'opacity:1'], [until, 'opacity:0']])}}\n.c${i}{animation-name:c${i}}\n`;
+  caps += `<text class="a cap c${i}" x="${width / 2}" y="${BAR + termH + 23}" text-anchor="middle">${esc(cap.text)}</text>\n`;
+});
+
+css += `@keyframes ptr{${keyframes(points.map(([seconds, col, line, linear]) => [seconds, `transform:translate(${px(col)}px,${py(line)}px);animation-timing-function:${linear ? 'linear' : 'cubic-bezier(.45,0,.3,1)'}`]))}}\n.ptr{animation-name:ptr}\n`;
+// A click is a ring that grows and fades; a drag holds it small until the release.
+const ringStops = [[0, 'opacity:0;transform:scale(.4)']];
+for (const [from, to] of rings) {
+  ringStops.push([from - 0.02, 'opacity:0;transform:scale(.4)'], [from, 'opacity:.9;transform:scale(.4)']);
+  if (to > from) ringStops.push([from + 0.15, 'opacity:.9;transform:scale(.7)'], [to, 'opacity:.9;transform:scale(.7)']);
+  ringStops.push([to + 0.45, 'opacity:0;transform:scale(1.5)']);
+}
+css += `@keyframes ring{${keyframes(ringStops)}}\n.ring{animation-name:ring}\n`;
 
 const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${width} ${height}" width="${width}" height="${height}" role="img" aria-label="tmux-band: a sidebar listing Claude Code sessions with their state, beside the selected session">
 <style>${css}</style>
+<clipPath id="term"><rect width="${width}" height="${BAR + termH}" rx="9"/></clipPath>
 <rect width="${width}" height="${BAR + termH}" rx="9" fill="${BG}"/>
 <path d="M0 ${BAR}V9a9 9 0 0 1 9-9h${width - 18}a9 9 0 0 1 9 9v${BAR - 9}z" fill="#2b2b2b"/>
 <circle cx="16" cy="14" r="5.5" fill="#ff5f57"/><circle cx="34" cy="14" r="5.5" fill="#febc2e"/><circle cx="52" cy="14" r="5.5" fill="#28c840"/>
 <text x="${width / 2}" y="18" text-anchor="middle" font-family="-apple-system,BlinkMacSystemFont,sans-serif" font-size="12" fill="#9a9a9a">band</text>
-<g class="t">
+<g class="t" clip-path="url(#term)">
 ${body}</g>
+${caps}<g class="a ptr"><circle class="a r ring" r="11" fill="none" stroke="#ffffff" stroke-width="2"/><path d="M0 0v15.5l4.2-3.6 2.7 6.1 2.3-1-2.7-6h5.6z" fill="#ffffff" stroke="#000000" stroke-width="1" stroke-linejoin="round"/></g>
 </svg>
 `;
 fs.writeFileSync(path.join(root, 'docs/demo.svg'), svg);
-console.log(`docs/demo.svg: ${FRAMES.length} frames, ${total.toFixed(1)}s loop, ${svg.length} bytes`);
+console.log(`docs/demo.svg: ${states.length} states, ${total.toFixed(1)}s loop, ${svg.length} bytes`);
