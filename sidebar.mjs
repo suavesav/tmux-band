@@ -6,6 +6,7 @@ import path from 'node:path';
 import {
   parseWindows, render, renderTable, hit, hitTable, needsConfirm, dragBegin, dragMove, dragEnd, dragView, dragExpired,
   repoLabel, optionValue, prValue, widthStep, parseWidth, WIDTH_DEFAULT, entryName,
+  groupName, chain, releaseCmds, renameCmds, editInput,
 } from './sidebar-core.mjs';
 
 const [TMUX_BIN, SOCK] = process.argv.slice(2);
@@ -25,12 +26,12 @@ const ESC = '\x1b';
 
 const LIST_FORMAT = [
   '#{window_id}', '#{window_active}', '#{@band_state}', '#{@band_tag}', '#{@band_since}',
-  '#{@band_wait}', '#{@band_model}', '#{@band_repo}', '#{@band_pr}', '#{window_name}',
+  '#{@band_wait}', '#{@band_model}', '#{@band_repo}', '#{@band_pr}', '#{@band_group}', '#{window_name}',
 ].join('\t');
 const OWN_FORMAT = [
   '#{window_id}', '#{pane_width}', '#{window_panes}', '#{session_attached}',
   '#{window_active}', '#{window_zoomed_flag}', '#{window_width}', '#{@band_sidebar_width}',
-  '#{@band_unnamed}', '#{@band_transcript}',
+  '#{@band_unnamed}', '#{pane_active}', '#{@band_session}', '#{@band_focus}', '#{@band_transcript}',
 ].join('\t');
 
 function findBin(name) {
@@ -83,6 +84,14 @@ let opening = false;
 let drag = null;
 let lastDrawKey = '';
 let quitting = false;
+// `@band_focus`, shared by every window's sidebar.
+let focus = null;
+// Ticks in a row whose window list had no member of `focus`.
+let focusMissed = 0;
+// { group, text } while a group's name is being typed. editEpoch keeps a
+// tick that read tmux before the edit began from cancelling it.
+let edit = null;
+let editEpoch = 0;
 
 const size = () => ({ width: process.stdout.columns || sidebarWidth, height: process.stdout.rows || 24 });
 
@@ -102,7 +111,7 @@ function draw() {
   if (quitting) return;
   const { width, height } = size();
   const now = Math.floor(Date.now() / 1000);
-  const lines = (zoomed ? renderTable : render)({ ...dragView(rows, drag, Date.now()), width, height, confirm, now }).split('\n');
+  const lines = (zoomed ? renderTable : render)({ ...dragView(rows, drag, Date.now()), width, height, confirm, focus, edit, now }).split('\n');
   const key = `${zoomed}:${width}:${height}`;
   let out = '';
   if (key !== lastDrawKey) out += `${ESC}[2J`;
@@ -282,16 +291,29 @@ async function kickPrs() {
 
 // ---- name ----
 
-function retitleRecord(session, title) {
+// A restore record (bin/band-record.sh, bin/band-restore) is five lines: cwd,
+// title, tag, CLAUDE_CONFIG_DIR, group. One written before 0.5.0 has four.
+function editRecord(session, index, value) {
   if (!UUID.test(session)) return;
   const file = path.join(B, 'state', 'sessions', session);
   try {
     const rows = fs.readFileSync(file, 'utf8').split('\n');
     if (rows.length < 4) return;
-    rows[1] = title;
+    while (rows.length < 6) rows.push('');
+    if (rows[index] === value) return;
+    rows[index] = value;
     fs.writeFileSync(`${file}.tmp`, rows.join('\n'));
     fs.renameSync(`${file}.tmp`, file);
   } catch { /* no record */ }
+}
+
+// `${session}\t${group}` last written to the record.
+let recordedGroup = null;
+function noteGroup(session, group) {
+  const key = `${session}\t${group}`;
+  if (key === recordedGroup) return;
+  recordedGroup = key;
+  editRecord(session, 4, group);
 }
 
 // A window marked @band_unnamed takes the first prompt, then the ai title.
@@ -303,7 +325,7 @@ async function nameWindow(file) {
   if (naming.title) args.push(';', 'set-option', '-wu', '-t', ownWindow, '@band_unnamed');
   if ((await tmux(args)) === null) return;
   naming.written = name;
-  retitleRecord(line(await tmux(['show-options', '-wqv', '-t', ownWindow, '@band_session'])), name);
+  editRecord(line(await tmux(['show-options', '-wqv', '-t', ownWindow, '@band_session'])), 1, name);
 }
 
 // ---- width ----
@@ -346,6 +368,7 @@ async function holdWidth(reading) {
 
 async function tickBody() {
   const epoch = zoomEpoch;
+  const edits = editEpoch;
   const own = line(await tmux(['display-message', '-p', '-t', PANE, OWN_FORMAT])).split('\t');
   // tmux 3.8 answers a gone pane with an empty line and status 0.
   if (!WINDOW_ID.test(own[0])) {
@@ -353,11 +376,14 @@ async function tickBody() {
     return;
   }
   failures = 0;
-  const [windowId, paneWidth, panes, attached, activeFlag, zoomFlag, windowWidth, widthOption = '', unnamed = '', transcript = ''] = own;
+  const [windowId, paneWidth, panes, attached, activeFlag, zoomFlag, windowWidth, widthOption = '', unnamed = '', paneActive = '', session = '', focusOption = '', ...transcriptParts] = own;
+  const transcript = transcriptParts.join('\t');
   ownWindow = windowId;
+  focus = focusOption || null;
   if (epoch === zoomEpoch) zoomed = zoomFlag === '1';
   if (panes === '1') return quit();
   const active = activeFlag === '1';
+  if (edit && edits === editEpoch && (!active || paneActive !== '1')) edit = null;
   if (zoomed && !active) await setZoom(false);
   // A reply read before a zoom or unzoom carries the other state's width.
   if (zoomed || zoomFlag === '1') widthSeen = null;
@@ -369,8 +395,21 @@ async function tickBody() {
   else if (inactiveTicks++ % 5 !== 0) return;
   const listed = await tmux(['list-windows', '-t', '=band', '-F', LIST_FORMAT]);
   if (listed !== null) rows = parseWindows(listed);
+  // Two misses in a row: a rename's chained set-option can land between this
+  // tick's two reads.
+  if (listed !== null && focus && !rows.some((r) => r.group === focus)) {
+    if (++focusMissed >= 2) {
+      focusMissed = 0;
+      focus = null;
+      await tmux(['set-option', '-gu', '@band_focus']);
+    }
+  } else {
+    focusMissed = 0;
+  }
+  if (edit && edits === editEpoch && !rows.some((r) => r.group === edit.group)) edit = null;
   const mine = rows.find((r) => r.id === ownWindow);
   if (listed !== null && mine) {
+    noteGroup(session, mine.group);
     if (mine.state === 'done' && pr.prevState !== undefined && pr.prevState !== 'done') pr.pending = true;
     pr.prevState = mine.state;
   }
@@ -419,7 +458,9 @@ async function newWindow() {
     const made = await tmux(args, odd && fs.existsSync(dir) ? { cwd: dir } : {});
     const m = /^(@\d+) (%\d+)$/.exec(line(made));
     if (!m) return;
-    await tmux(['set-option', '-w', '-t', m[1], '@band_since', String(Math.floor(Date.now() / 1000)), ';', 'set-option', '-w', '-t', m[1], '@band_unnamed', '1']);
+    const group = rows.some((r) => r.group === focus) ? groupName(focus) : '';
+    await tmux(['set-option', '-w', '-t', m[1], '@band_since', String(Math.floor(Date.now() / 1000)), ';', 'set-option', '-w', '-t', m[1], '@band_unnamed', '1',
+      ...(group ? [';', 'set-option', '-w', '-t', m[1], '@band_group', group] : [])]);
     const split = await tmux(['split-window', '-d', '-hb', '-l', String(sidebarWidth), '-t', m[2], process.execPath, process.argv[1], TMUX_BIN, SOCK]);
     if (split === null) await tmux(['kill-window', '-t', m[1]]);
   } finally {
@@ -429,8 +470,18 @@ async function newWindow() {
 
 async function click(x, y) {
   const { width, height } = size();
-  const result = (zoomed ? hitTable : hit)({ x, y, rows, width, height, confirm });
+  const result = (zoomed ? hitTable : hit)({ x, y, rows, width, height, confirm, focus });
   switch (result.kind) {
+    case 'rename':
+      startEdit(result.group);
+      return;
+    case 'focus': {
+      confirm = null;
+      const on = focus === result.group && rows.some((r) => r.group === focus);
+      const name = groupName(result.group);
+      await tmux(on || !name ? ['set-option', '-gu', '@band_focus'] : ['set-option', '-g', '@band_focus', name]);
+      break;
+    }
     case 'expand':
       confirm = null;
       await setZoom(true);
@@ -488,32 +539,73 @@ function press(x, y) {
     return Promise.resolve();
   }
   const { width, height } = size();
-  const result = (zoomed ? hitTable : hit)({ x, y, rows, width, height, confirm });
+  const result = (zoomed ? hitTable : hit)({ x, y, rows, width, height, confirm, focus });
   if (result.kind !== 'select') return click(x, y);
-  drag = dragBegin({ id: result.id, y, rows, height, zoomed, now: Date.now() });
+  drag = dragBegin({ id: result.id, y, rows, height, zoomed, now: Date.now(), focus });
   return Promise.resolve();
 }
 
 function dragTo(y) {
   if (!drag) return;
-  drag = dragMove(drag, { y, rows, height: size().height, zoomed, now: Date.now() });
+  drag = dragMove(drag, { y, rows, height: size().height, zoomed, now: Date.now(), focus });
   draw();
 }
 
 async function release() {
   const held = drag;
   drag = null;
-  const end = dragEnd(held, rows);
+  const end = dragEnd(held, rows, focus);
   if (end.kind === 'select') return select(end.id);
   if (end.kind === 'move') {
     confirm = null;
-    // The current window is an index, so a move can change which window it is.
-    const active = rows.find((r) => r.active)?.id;
-    await tmux([...end.args, ';', 'move-window', '-r', '-t', '=band:', ...(active ? [';', 'select-window', '-t', active] : [])]);
+    const cmds = releaseCmds(end, { rows, focus });
+    const group = end.created ? groupName(end.group) : '';
+    if (cmds.length) await tmux(chain(cmds));
+    if (group) {
+      await tick();
+      startEdit(group);
+      return;
+    }
     if (!zoomed) await focusSession(ownWindow);
     await tick();
   }
   draw();
+}
+
+// ---- renaming a group ----
+
+// Keys reach the sidebar only while its own pane has the focus, so the
+// rename click does not hand it back to the session pane.
+function startEdit(group) {
+  confirm = null;
+  editEpoch++;
+  edit = { group, text: group };
+  draw();
+}
+
+async function endEdit() {
+  edit = null;
+  if (!zoomed) await focusSession(ownWindow);
+  await tick();
+  draw();
+}
+
+async function commitEdit() {
+  if (!edit) return;
+  const { group, text } = edit;
+  edit = null;
+  const cmds = renameCmds({ rows, group, text, focus });
+  if (cmds.length) await tmux(chain(cmds));
+  await endEdit();
+}
+
+function editKeys(data) {
+  const { text, end } = editInput(edit.text, data);
+  edit.text = text;
+  if (end === 'cancel') return endEdit();
+  if (end === 'commit') return commitEdit();
+  draw();
+  return Promise.resolve();
 }
 
 async function keypress() {
@@ -527,6 +619,11 @@ async function keypress() {
 
 function onInput(chunk) {
   const mouse = /\x1b\[<(\d+);(\d+);(\d+)([Mm])/g;
+  if (edit) {
+    const pressed = [...String(chunk).matchAll(mouse)].some((m) => m[4] === 'M' && m[1] === '0');
+    (pressed ? commitEdit() : editKeys(String(chunk))).catch((e) => log(`edit: ${e?.stack || e}`));
+    return;
+  }
   let any = false;
   for (const m of String(chunk).matchAll(mouse)) {
     any = true;

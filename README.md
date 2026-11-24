@@ -27,6 +27,7 @@ band                          # open the band window (starts Claude here the fir
 band new                      # another Claude session, in this folder; it shows up in the sidebar
 band new -n "fix login" -C ~/code/web-app -- claude --model opus
 band new -t work -- CLAUDE_CONFIG_DIR=~/.claude-work claude
+band new -g web               # straight into the web group
 ```
 
 Then use the mouse:
@@ -35,6 +36,10 @@ Then use the mouse:
 | --- | --- |
 | a row | jump to that session |
 | drag a row | reorder the list |
+| drag a row onto `new group` | start a group with it; type the group's name and press Enter |
+| drag a row across a group's name | move it into or out of that group |
+| a group's name | rename the group |
+| `◎` beside a group | show only that group in every sidebar; `◉` shows them all again |
 | drag the sidebar's edge | make it wider or narrower (20 to 60 columns) |
 | `✕` | close it (asks first unless it is done) |
 | `⤢` | expand the list into a table with every detail |
@@ -54,7 +59,7 @@ Close the terminal window whenever you want. The sessions keep running; `band` b
 
 ## When tmux dies
 
-A crash or a reboot takes every session with it. Run `band` again and it offers to reopen the Claude sessions from the last 24 hours, each resumed with `claude --resume` in its folder. Sessions you closed yourself stay closed.
+A crash or a reboot takes every session with it. Run `band` again and it offers to reopen the Claude sessions from the last 24 hours, each resumed with `claude --resume` in its folder and its group. Sessions you closed yourself stay closed.
 
 ## How it works
 

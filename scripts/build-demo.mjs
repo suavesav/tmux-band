@@ -9,7 +9,7 @@ import { fileURLToPath } from 'node:url';
 import { render, renderTable } from '../sidebar-core.mjs';
 
 const root = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
-const W = 30, PANE = 54, COLS = W + 1 + PANE, ROWS = 20;
+const W = 30, PANE = 54, COLS = W + 1 + PANE, ROWS = 23;
 const CW = 7.8, LH = 17, PAD = 12, BAR = 28, CAP = 34;
 const NOW = 1763300000;
 const WIDE = 44;

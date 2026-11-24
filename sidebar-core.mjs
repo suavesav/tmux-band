@@ -18,6 +18,16 @@ const CONFIRM_TEXT = ' Close?  yes   no';
 const COLLAPSE_TEXT = '⤡ collapse ';
 const BADGE_MIN_ROOM = 12;
 const MAX_PRS = 3;
+// A spacer, then the group's title line.
+const HEAD_LINES = 2;
+const EYE_COLS = 3;
+const FOCUS_COLOR = 75;
+const HEAD_COLOR = 176;
+// The new group box under the new-session line: top edge, label, bottom edge.
+const BOX_LINES = 3;
+const BOX_TEXT = 'new group';
+const TABLE_BOX_TEXT = ' ┆ new group ┆';
+export const GROUP_MAX = 24;
 
 const LOOKS = {
   input: { mark: '●', color: 214, label: 'needs input' },
@@ -155,7 +165,8 @@ export function parseWindows(stdout) {
       model: text(6),
       repo: text(7),
       pr: text(8),
-      name: f.slice(9).join(' ').replace(CONTROL, ''),
+      group: text(9),
+      name: f.slice(10).join(' ').replace(CONTROL, ''),
     });
   }
   return rows;
@@ -224,35 +235,156 @@ export function prCell(prs) {
   return { text: prs.map((p) => `#${p.number} ${prWord(p)}`).join(', '), color: prColor(leadPr(prs)) };
 }
 
+// ---- groups ----
+
+// A name for `@band_group` or `@band_focus`: tmux expands `#` in formats and
+// ends a command at an argument ending in `;`.
+export const groupName = (s) => optionValue(String(s ?? '').replace(/#/g, ''), GROUP_MAX);
+
+export function newGroupName(rows) {
+  const used = new Set(rows.map((r) => r.group));
+  let n = 1;
+  while (used.has(`group ${n}`)) n++;
+  return `group ${n}`;
+}
+
+const focusOf = (rows, focus) => (focus && rows.some((r) => r.group === focus) ? focus : null);
+const rowItem = (row, group) => ({ kind: 'row', key: row.id, row, group });
+const headItem = (group) => ({ kind: 'head', key: `g:${group}`, group });
+
+// The list both views draw: ungrouped rows, then each group (in the order of
+// its first member) as a head and its rows. `order` is a drag's item keys; a
+// row there belongs to the nearest head above it.
+export function listItems({ rows, focus = null, order = null }) {
+  const on = focusOf(rows, focus);
+  if (!order) {
+    const shown = on ? rows.filter((r) => r.group === on) : rows;
+    const out = shown.filter((r) => !r.group).map((r) => rowItem(r, ''));
+    for (const group of new Set(shown.map((r) => r.group).filter(Boolean))) {
+      out.push(headItem(group), ...shown.filter((r) => r.group === group).map((r) => rowItem(r, group)));
+    }
+    return out;
+  }
+  const byId = new Map(rows.map((r) => [r.id, r]));
+  const out = [];
+  let group = '';
+  for (const key of order) {
+    if (key.startsWith('g:')) {
+      group = key.slice(2);
+      out.push(headItem(group));
+    } else if (byId.has(key)) {
+      out.push(rowItem(byId.get(key), group));
+    }
+  }
+  const listed = new Set(order);
+  for (const r of rows) {
+    if (listed.has(r.id) || (on && r.group !== on)) continue;
+    let at = out.findIndex((i) => i.kind === 'head' && (!r.group || i.group === r.group));
+    if (r.group && at < 0) at = out.push(headItem(r.group)) - 1;
+    if (at < 0) at = out.length;
+    else if (r.group) for (at++; at < out.length && out[at].kind === 'row'; at++);
+    out.splice(at, 0, rowItem(r, r.group));
+  }
+  return out;
+}
+
+function waitingText(items, rows, focus) {
+  const on = focusOf(rows, focus);
+  const input = (r) => r.state === 'input';
+  const waiting = items.filter((i) => i.kind === 'row' && input(i.row)).length;
+  const elsewhere = on ? rows.filter((r) => r.group !== on && input(r)).length : 0;
+  return { waiting, elsewhere: elsewhere ? `, ${elsewhere} elsewhere` : '' };
+}
+
+// headHit() reads the eye in the last EYE_COLS.
+function headLine(group, width, focused, draft) {
+  if (width < EYE_COLS + 2) return fit('', width);
+  const eye = focused ? fg(FOCUS_COLOR, ' ◉ ') : fg(DIM, ' ◎ ');
+  const room = width - EYE_COLS - 1;
+  if (draft !== null) {
+    let text = `${draft}▏`;
+    while (textWidth(text) > room) text = Array.from(text).slice(1).join('');
+    return ` ${fg(HEAD_COLOR, fit(text, room))}${eye}`;
+  }
+  if (textWidth(group) + 1 > room) return ` ${fg(HEAD_COLOR, bold(fit(group, room)))}${eye}`;
+  return ` ${fg(HEAD_COLOR, `${bold(group)} ${'─'.repeat(room - textWidth(group) - 1)}`)}${eye}`;
+}
+
+function headHit(group, x, width) {
+  return { kind: x > width - EYE_COLS ? 'focus' : 'rename', id: null, group };
+}
+
+// ---- the viewport ----
+
+// The index of the first item shown: `start` when given (a drag holds the
+// view still), else the smallest that shows the head being renamed whole,
+// else the active row.
+function firstShown(items, lines, room, start, editing) {
+  let last = items.length;
+  for (let used = 0; last > 0 && used + lines[last - 1] <= room; last--) used += lines[last - 1];
+  if (start !== null && start !== undefined) return Math.max(0, Math.min(start, last));
+  const head = editing === null ? -1 : items.findIndex((i) => i.kind === 'head' && i.group === editing);
+  const target = head >= 0 ? head : items.findIndex((i) => i.kind === 'row' && i.row.active);
+  if (target < 0) return 0;
+  let first = target + 1;
+  for (let used = 0; first > 0 && used + lines[first - 1] <= room; first--) used += lines[first - 1];
+  return Math.min(first, last);
+}
+
+// The items shown, each with `at`, the 1-based line it starts on, and `lines`.
+function place(items, { height, start, zoomed, editing = null }) {
+  const lines = items.map((i) => (zoomed ? 1 : i.kind === 'head' ? HEAD_LINES : ROW_LINES));
+  const top = zoomed ? TABLE_HEADER_LINES : HEADER_LINES;
+  const room = Math.max(0, height - top - (zoomed ? 0 : NEW_LINES + BOX_LINES));
+  const out = [];
+  let used = 0;
+  for (let i = firstShown(items, lines, room, start, editing); i < items.length && used + lines[i] <= room; i++) {
+    out.push({ ...items[i], at: top + 1 + used, lines: lines[i] });
+    used += lines[i];
+  }
+  return out;
+}
+
 // ---- normal view ----
 
-// The index of the first row shown: `start` when given (a drag holds the
-// view still), else the one that keeps the active row in view.
-function windowStart(rows, capacity, start = null) {
-  const last = Math.max(0, rows.length - capacity);
-  if (start !== null && start !== undefined) return Math.max(0, Math.min(start, last));
-  if (rows.length <= capacity) return 0;
-  const activeAt = Math.max(0, rows.findIndex((r) => r.active));
-  return Math.max(0, Math.min(activeAt - capacity + 1, last));
+// listItems() entries plus `top`, the 1-based line of the item's spacer.
+export function layout({ rows, height, start = null, focus = null, order = null }) {
+  return place(listItems({ rows, focus, order }), { height, start, zoomed: false })
+    .map(({ at, lines, ...item }) => ({ ...item, top: at }));
 }
 
-export function layout({ rows, height, start = null }) {
-  const capacity = Math.max(0, Math.floor((height - HEADER_LINES - NEW_LINES) / ROW_LINES));
-  const first = windowStart(rows, capacity, start);
-  return rows.slice(first, first + capacity).map((row, i) => ({ row, top: HEADER_LINES + 1 + ROW_LINES * i }));
+const newLineOf = (shown) => HEADER_LINES + shown.reduce((n, s) => n + s.lines, 0) + NEW_LINES;
+
+// The 1-based line of `+ new session`; the new group box is the lines under it.
+export function newLine({ rows, height, start = null, focus = null, order = null }) {
+  return newLineOf(place(listItems({ rows, focus, order }), { height, start, zoomed: false }));
 }
 
-export function newLine({ rows, height }) {
-  return HEADER_LINES + ROW_LINES * layout({ rows, height }).length + NEW_LINES;
+const dropTone = (text, drop) => (drop === 'new' ? `${DRAG_BG}${fg(FOCUS_COLOR, text)}${RESET}` : fg(DIM, text));
+
+// The BOX_LINES lines of the new group box, one column in from each side.
+function newGroupBox(width, drop) {
+  const inner = width - 4;
+  if (inner < BOX_TEXT.length) return Array.from({ length: BOX_LINES }, () => fit('', width));
+  const left = Math.floor((inner - BOX_TEXT.length) / 2);
+  const label = ' '.repeat(left) + BOX_TEXT + ' '.repeat(inner - BOX_TEXT.length - left);
+  return [`┌${'┄'.repeat(inner)}┐`, `┆${label}┆`, `└${'┄'.repeat(inner)}┘`].map((l) => dropTone(` ${l} `, drop));
 }
 
-export function render({ rows, width, height, confirm = null, now = 0, dragging = null, start = null }) {
+export function render({ rows, width, height, confirm = null, now = 0, dragging = null, start = null, order = null, drop = null, focus = null, edit = null }) {
+  const items = listItems({ rows, focus, order });
+  const on = focusOf(rows, focus);
   const lines = [];
   lines.push(width > 7 ? bold(fit(' band', width - 2)) + fg(DIM, EXPAND_TEXT) : bold(fit(' band', width)));
-  const waiting = rows.filter((r) => r.state === 'input').length;
+  const { waiting, elsewhere } = waitingText(items, rows, focus);
   const summary = waiting === 0 ? ' nothing waiting' : waiting === 1 ? ' 1 needs input' : ` ${waiting} need input`;
-  lines.push(fg(DIM, fit(summary, width)));
-  for (const { row } of layout({ rows, height, start })) {
+  lines.push(fg(DIM, fit(summary + elsewhere, width)));
+  for (const item of place(items, { height, start, zoomed: false, editing: edit?.group ?? null })) {
+    if (item.kind === 'head') {
+      lines.push(fit('', width), headLine(item.group, width, on === item.group, edit?.group === item.group ? edit.text : null));
+      continue;
+    }
+    const { row } = item;
     const { color } = look(row.state);
     const held = dragging !== null && dragging === row.id;
     const lead = held ? DRAG_LOOK : look(row.state);
@@ -281,6 +413,7 @@ export function render({ rows, width, height, confirm = null, now = 0, dragging 
   }
   lines.push(fit('', width));
   lines.push(fg(DIM, fit(NEW_TEXT, width)));
+  lines.push(...newGroupBox(width, drop));
   return lines.slice(0, Math.max(0, height)).join('\n');
 }
 
@@ -290,24 +423,32 @@ function confirmHit(x, id) {
   return { kind: 'none', id: null };
 }
 
-export function hit({ x, y, rows, width, height, confirm = null }) {
+export function hit({ x, y, rows, width, height, confirm = null, focus = null }) {
   if (y === 1 && x > width - 3) return { kind: 'expand', id: null };
-  if (y === newLine({ rows, height }) && x <= textWidth(NEW_TEXT)) return { kind: 'new', id: null };
-  const at = layout({ rows, height }).find(({ top }) => top <= y && y < top + ROW_LINES);
-  if (!at) return { kind: 'none', id: null };
-  const line = y - at.top;
-  const id = at.row.id;
-  if (confirm !== null && confirm === id && line === 2) return confirmHit(x, id);
-  if (line === 1 && x > width - 3) return { kind: 'close', id };
-  return { kind: 'select', id };
+  if (y === newLine({ rows, height, focus }) && x <= textWidth(NEW_TEXT)) return { kind: 'new', id: null };
+  for (const item of layout({ rows, height, focus })) {
+    const { top } = item;
+    if (item.kind === 'head') {
+      if (y === top + 1) return headHit(item.group, x, width);
+      if (y === top) return { kind: 'none', id: null };
+      continue;
+    }
+    if (y < top || y >= top + ROW_LINES) continue;
+    const line = y - top;
+    const id = item.row.id;
+    if (confirm !== null && confirm === id && line === 2) return confirmHit(x, id);
+    if (line === 1 && x > width - 3) return { kind: 'close', id };
+    return { kind: 'select', id };
+  }
+  return { kind: 'none', id: null };
 }
 
 // ---- table view ----
 
-export function tableLayout({ rows, height, start = null }) {
-  const capacity = Math.max(0, height - TABLE_HEADER_LINES);
-  const first = windowStart(rows, capacity, start);
-  return rows.slice(first, first + capacity).map((row, i) => ({ row, y: TABLE_HEADER_LINES + 1 + i }));
+// listItems() entries plus `y`, the 1-based line of the item.
+export function tableLayout({ rows, height, start = null, focus = null, order = null }) {
+  return place(listItems({ rows, focus, order }), { height, start, zoomed: true })
+    .map(({ at, lines, ...item }) => ({ ...item, y: at }));
 }
 
 function tableColumns(width) {
@@ -341,16 +482,24 @@ function tableCell(col, row, now, held) {
   }
 }
 
-export function renderTable({ rows, width, height, confirm = null, now = 0, dragging = null, start = null }) {
+export function renderTable({ rows, width, height, confirm = null, now = 0, dragging = null, start = null, order = null, drop = null, focus = null, edit = null }) {
   const cols = tableColumns(width);
   const sum = cols.reduce((n, c) => n + c.width, 0);
-  const waiting = rows.filter((r) => r.state === 'input').length;
-  const summary = ` band   ${rows.length} session${rows.length === 1 ? '' : 's'}, ${waiting} need${waiting === 1 ? 's' : ''} input`;
+  const items = listItems({ rows, focus, order });
+  const on = focusOf(rows, focus);
+  const count = items.filter((i) => i.kind === 'row').length;
+  const { waiting, elsewhere } = waitingText(items, rows, focus);
+  const summary = ` band   ${count} session${count === 1 ? '' : 's'}, ${waiting} need${waiting === 1 ? 's' : ''} input${elsewhere}`;
   const lines = [];
   lines.push(width > 17 ? bold(fit(summary, width - 11)) + fg(DIM, COLLAPSE_TEXT) : bold(fit(summary, width)));
-  lines.push(fit('', width));
+  lines.push(dropTone(fit(TABLE_BOX_TEXT, width), drop));
   lines.push(fg(DIM, fit(' ' + cols.map((c) => fit(c.title, c.width)).join(''), width)));
-  for (const { row } of tableLayout({ rows, height, start })) {
+  for (const item of place(items, { height, start, zoomed: true, editing: edit?.group ?? null })) {
+    if (item.kind === 'head') {
+      lines.push(headLine(item.group, width, on === item.group, edit?.group === item.group ? edit.text : null));
+      continue;
+    }
+    const { row } = item;
     const held = dragging !== null && dragging === row.id;
     const bg = held ? DRAG_BG : row.active ? ACTIVE_BG : '';
     if (confirm !== null && confirm === row.id) {
@@ -363,10 +512,11 @@ export function renderTable({ rows, width, height, confirm = null, now = 0, drag
   return lines.slice(0, Math.max(0, height)).join('\n');
 }
 
-export function hitTable({ x, y, rows, width, height, confirm = null }) {
+export function hitTable({ x, y, rows, width, height, confirm = null, focus = null }) {
   if (y === 1) return { kind: x > width - 11 ? 'collapse' : 'none', id: null };
-  const at = tableLayout({ rows, height }).find((r) => r.y === y);
+  const at = tableLayout({ rows, height, focus }).find((r) => r.y === y);
   if (!at) return { kind: 'none', id: null };
+  if (at.kind === 'head') return headHit(at.group, x, width);
   const id = at.row.id;
   if (confirm !== null && confirm === id) return confirmHit(x, id);
   if (x > width - 3) return { kind: 'close', id };
@@ -382,11 +532,9 @@ export const DRAG_STALE_MS = 10_000;
 // A press that slips one line within this time is still a click.
 const DRAG_SLIP_MS = 250;
 
-// The lines of the rows shown: [{ id, from, to }].
-function spans({ rows, height, start, zoomed }) {
-  return zoomed
-    ? tableLayout({ rows, height, start }).map(({ row, y }) => ({ id: row.id, from: y, to: y }))
-    : layout({ rows, height, start }).map(({ row, top }) => ({ id: row.id, from: top, to: top + ROW_LINES - 1 }));
+// The lines of the items shown: [{ key, from, to }]. A head's spacer is its own.
+function spans(items, { height, start, zoomed }) {
+  return place(items, { height, start, zoomed }).map((s) => ({ key: s.key, from: s.at, to: s.at + s.lines - 1 }));
 }
 
 // `ids` with `id` moved to where `over` is.
@@ -409,57 +557,114 @@ export function moveArgs(order, id) {
     : ['move-window', '-d', '-a', '-s', id, '-t', order[at - 1]];
 }
 
-// `rows` in a drag's order: its ids first (gone ones dropped), then the rest.
-export function dragRows(rows, drag) {
-  if (!drag) return rows;
-  const byId = new Map(rows.map((r) => [r.id, r]));
-  return [...drag.order.map((id) => byId.get(id)).filter(Boolean), ...rows.filter((r) => !drag.order.includes(r.id))];
-}
-
-// A press on row `id` at line y. { id, order, start, y, at, last, engaged, moved }:
-// `start` is the first row shown, held for the whole drag.
-export function dragBegin({ id, y, rows, height, zoomed = false, now }) {
-  const first = spans({ rows, height, start: null, zoomed })[0];
+// A press on row `id` at line y. { id, order, start, drop, y, at, last,
+// engaged, moved }: `order` is the item keys listed at the press, `start` the
+// first item shown, held for the whole drag, `drop` 'new' over the new group box.
+export function dragBegin({ id, y, rows, height, zoomed = false, now, focus = null }) {
+  const items = listItems({ rows, focus });
+  const first = spans(items, { height, start: null, zoomed })[0];
   return {
-    id, y, at: now, last: now, engaged: false, moved: false,
-    order: rows.map((r) => r.id),
-    start: first ? rows.findIndex((r) => r.id === first.id) : 0,
+    id, y, at: now, last: now, engaged: false, moved: false, drop: null,
+    order: items.map((i) => i.key),
+    start: first ? items.findIndex((i) => i.key === first.key) : 0,
   };
 }
 
-export function dragMove(drag, { y, rows, height, zoomed = false, now }) {
+export function dragMove(drag, { y, rows, height, zoomed = false, now, focus = null }) {
   const next = { ...drag, last: now };
   if (!next.engaged) {
     const dy = Math.abs(y - drag.y);
     if (dy < 1 || (dy < 2 && now - drag.at < DRAG_SLIP_MS)) return next;
     next.engaged = true;
   }
-  const list = dragRows(rows, next);
-  let shown = spans({ rows: list, height, start: next.start, zoomed });
-  if (!shown.length) return next;
-  next.start = list.findIndex((r) => r.id === shown[0].id);
-  // The first and last rows shown are the scroll zones: the table's last
-  // row sits on the pane's last line, so there is nothing below it to reach.
+  const items = listItems({ rows, focus, order: next.order });
+  let shown = spans(items, { height, start: next.start, zoomed });
+  const box = zoomed ? y === 2 : y > newLineOf(place(items, { height, start: next.start, zoomed: false }));
+  next.drop = box ? 'new' : null;
+  if (box || !shown.length) return next;
+  next.start = items.findIndex((i) => i.key === shown[0].key);
+  // The first and last items shown are the scroll zones: the table's last
+  // line is the pane's last line, so there is nothing below it to reach.
   if (y <= shown[0].to && next.start > 0) next.start -= 1;
-  else if (y >= shown.at(-1).from && next.start + shown.length < list.length) next.start += 1;
-  shown = spans({ rows: list, height, start: next.start, zoomed });
-  const over = (shown.filter((s) => y >= s.from).at(-1) || shown[0]).id;
+  else if (y >= shown.at(-1).from && next.start + shown.length < items.length) next.start += 1;
+  shown = spans(items, { height, start: next.start, zoomed });
+  const over = (shown.filter((s) => y >= s.from).at(-1) || shown[0]).key;
   if (over !== next.id) {
-    next.order = moveId(list.map((r) => r.id), next.id, over);
+    next.order = moveId(items.map((i) => i.key), next.id, over);
     next.moved = true;
   }
   return next;
 }
 
 // What a release does: { kind: 'select', id } for a row that never moved,
-// { kind: 'move', args } with moveArgs for a new order, else { kind: 'none' }.
-export function dragEnd(drag, rows) {
-  if (!drag || !rows.some((r) => r.id === drag.id)) return { kind: 'none' };
-  if (!drag.moved) return { kind: 'select', id: drag.id };
-  const order = dragRows(rows, drag).map((r) => r.id);
-  const args = moveArgs(order, drag.id);
-  if (!args || order.every((id, i) => id === rows[i].id)) return { kind: 'none' };
-  return { kind: 'move', args };
+// { kind: 'move', id, args, group, created }, else { kind: 'none' }. `group`
+// is null when it stays. A section lists its rows in tmux's order, so `args`
+// names a neighbour from the row's own section, and is null when tmux
+// already has the section in the previewed order.
+export function dragEnd(drag, rows, focus = null) {
+  const row = drag && rows.find((r) => r.id === drag.id);
+  if (!row) return { kind: 'none' };
+  const ids = rows.map((r) => r.id);
+  if (drag.engaged && drag.drop === 'new') {
+    const args = ids.at(-1) === row.id ? null : moveArgs(ids.filter((v) => v !== row.id).concat(row.id), row.id);
+    return { kind: 'move', id: row.id, args, group: newGroupName(rows), created: true };
+  }
+  if (!drag.moved) return { kind: 'select', id: row.id };
+  const items = listItems({ rows, focus, order: drag.order });
+  const to = items.find((i) => i.key === row.id).group;
+  const section = items
+    .filter((i) => i.kind === 'row' && i.group === to && (i.key === row.id || i.row.group === to))
+    .map((i) => i.key);
+  const listed = new Set(section);
+  const already = ids.filter((v) => listed.has(v)).every((v, i) => v === section[i]);
+  const args = already ? null : moveArgs(section, row.id);
+  const group = to === row.group ? null : to;
+  if (!args && group === null) return { kind: 'none' };
+  return { kind: 'move', id: row.id, args, group, created: false };
+}
+
+// One tmux argv from argv lists: a lone `;` argument separates commands.
+export const chain = (cmds) => cmds.flatMap((c, i) => (i ? [';', ...c] : c));
+
+// The tmux commands for dragEnd()'s `move`: the group first, then the move
+// with the renumber and the reselect of the window that was current (tmux's
+// current window is an index, so a move can change which window it names).
+export function releaseCmds(end, { rows, focus = null }) {
+  const cmds = [];
+  const group = typeof end.group === 'string' ? groupName(end.group) : null;
+  if (group) cmds.push(['set-option', '-w', '-t', end.id, '@band_group', group]);
+  else if (group === '') cmds.push(['set-option', '-wu', '-t', end.id, '@band_group']);
+  if (end.args) {
+    const active = rows.find((r) => r.active)?.id;
+    cmds.push(end.args, ['move-window', '-r', '-t', '=band:'], ...(active ? [['select-window', '-t', active]] : []));
+  }
+  if (end.created && focus) cmds.push(['set-option', '-gu', '@band_focus']);
+  return cmds;
+}
+
+// The tmux commands that rename `group` to the typed `text`; none when the
+// name is empty or the same.
+export function renameCmds({ rows, group, text, focus = null }) {
+  const name = groupName(text);
+  if (!name || name === group) return [];
+  const cmds = rows.filter((r) => r.group === group).map((r) => ['set-option', '-w', '-t', r.id, '@band_group', name]);
+  if (focus === group) cmds.push(['set-option', '-g', '@band_focus', name]);
+  return cmds;
+}
+
+// A rename draft after the terminal bytes `data`: { text, end }, `end`
+// 'commit' on Enter, 'cancel' on a lone ESC, else null. CSI and SS3
+// sequences (mouse, arrows) are dropped.
+export function editInput(text, data) {
+  const keys = String(data).replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, '').replace(/\x1bO./g, '');
+  let out = text;
+  for (const ch of keys) {
+    if (ch === '\x1b') return { text: out, end: 'cancel' };
+    if (ch === '\r' || ch === '\n') return { text: out, end: 'commit' };
+    if (ch === '\x7f' || ch === '\b') out = Array.from(out).slice(0, -1).join('');
+    else if (!/[\u0000-\u001f\u007f-\u009f]/.test(ch) && Array.from(out).length < GROUP_MAX) out += ch;
+  }
+  return { text: out, end: null };
 }
 
 export function dragExpired(drag, now) {
@@ -468,7 +673,9 @@ export function dragExpired(drag, now) {
 
 export function dragView(rows, drag, now) {
   const live = drag && drag.engaged && !dragExpired(drag, now);
-  return live ? { rows: dragRows(rows, drag), dragging: drag.id, start: drag.start } : { rows, dragging: null, start: null };
+  return live
+    ? { rows, order: drag.order, dragging: drag.id, start: drag.start, drop: drag.drop }
+    : { rows, order: null, dragging: null, start: null, drop: null };
 }
 
 // ---- the sidebar's width ----
