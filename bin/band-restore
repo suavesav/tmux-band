@@ -35,10 +35,11 @@ q() { printf "'%s'" "$(printf '%s' "$1" | sed "s/'/'\\\\''/g")"; }
 n=0
 for id in $lost; do
   printf %s "$id" | grep -Eq "$UUID" || continue
-  { IFS= read -r cwd; IFS= read -r title; IFS= read -r tag; IFS= read -r cfg; } < "$REC/$id"
+  group=
+  { IFS= read -r cwd; IFS= read -r title; IFS= read -r tag; IFS= read -r cfg; IFS= read -r group; } < "$REC/$id"
   cmd="claude --resume $id"
   [ -n "$cfg" ] && cmd="CLAUDE_CONFIG_DIR=$(q "$cfg") $cmd"
-  "$B/bin/band-new" --no-attach -n "$title" ${tag:+-t "$tag"} -C "$cwd" -- "$cmd" >/dev/null && rm -f "$REC/$id"
+  "$B/bin/band-new" --no-attach -n "$title" ${tag:+-t "$tag"} ${group:+-g "$group"} -C "$cwd" -- "$cmd" >/dev/null && rm -f "$REC/$id"
   n=$((n + 1)); [ "$n" -ge 12 ] && break
 done
 [ "$1" = --no-attach ] || [ "$n" -eq 0 ] || "$B/bin/band-attach" --no-restore

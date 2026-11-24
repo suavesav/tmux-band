@@ -1,7 +1,7 @@
 #!/bin/bash
 # band: one command for tmux-band.
 #   band                 attach here, or start the first session in this folder
-#   band new [...]       open a session (band-new: -n title -t tag -C dir -- cmd)
+#   band new [...]       open a session (band-new: -n title -t tag -g group -C dir -- cmd)
 #   band attach          bring the band window forward
 #   band restore         reopen sessions a dead tmux server took with it
 #   band install         set up (or update) ~/.local/share/band and the hooks

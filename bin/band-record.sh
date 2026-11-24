@@ -59,7 +59,8 @@ t set-option -w -t "$win" @band_session "$id" \; set-option -w -t "$win" @band_t
 cwd=$(field cwd)
 title=$(t display-message -p -t "$win" '#{window_name}')
 tag=$(t show-options -wqv -t "$win" @band_tag)
+group=$(t show-options -wqv -t "$win" @band_group)
 mkdir -p "$REC" 2>/dev/null && chmod 700 "$REC" 2>/dev/null
-{ printf '%s\n%s\n%s\n%s\n' "$cwd" "$title" "$tag" "${CLAUDE_CONFIG_DIR:-}" > "$REC/$id.tmp"; } 2>/dev/null \
+{ printf '%s\n%s\n%s\n%s\n%s\n' "$cwd" "$title" "$tag" "${CLAUDE_CONFIG_DIR:-}" "$group" > "$REC/$id.tmp"; } 2>/dev/null \
   && mv "$REC/$id.tmp" "$REC/$id" 2>/dev/null
 exit 0
